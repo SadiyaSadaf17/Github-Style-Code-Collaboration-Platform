@@ -1,0 +1,16 @@
+### create comment 
+POST http://localhost:5000/comment-api/comments
+Content-Type: application/json
+
+{
+  "parentType": "pullRequest",
+  "parentId": "69b8d78f86cad0e53bbef1bd",
+  "authorId": "69b7c25500d94be72c2dbf88",
+  "content": "Please change variable name"
+}  
+
+### get comment by parent 
+GET http://localhost:5000/comment-api/comments/69b8d78f86cad0e53bbef1bd
+
+### delete comment 
+DELETE http://localhost:5000/comment-api/comments/69b8e978107b39b18aa773bf

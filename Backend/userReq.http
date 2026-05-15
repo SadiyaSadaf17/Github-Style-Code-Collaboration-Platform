@@ -1,0 +1,54 @@
+### User Register
+POST http://localhost:5000/user-api/users
+Content-Type: application/json
+
+{
+  "firstName": "sadiya",
+  "lastName": "Shaik",
+  "email": "sadiya@example.com",
+  "password": "User@12345",
+  "profileImageUrl": "https://example.com/avatars/user.png"
+}
+
+
+### User Login
+POST http://localhost:5000/common-api/login
+Content-Type: application/json
+
+{
+  "email": "sadiya@example.com",
+  "password": "User@12345" 
+}
+
+
+### Change password
+PUT http://localhost:5000/common-api/change-password
+Content-Type: application/json
+
+{
+  "email":"sadiya@example.com",
+  "currentPassword":"User@12345",
+  "newPassword":"sadiya@123" 
+}
+
+
+### get user details
+GET http://localhost:5000/user-api/users/69b7b75ae2776038a96d2a67
+
+### update user 
+PATCH http://localhost:5000/user-api/users/69b7b75ae2776038a96d2a67
+Content-Type: application/json
+
+{
+  "firstName": "Sadiya",
+  "lastName": "Sadaf",
+  "profileImageUrl": "https://image.com/profile.png"
+}
+
+
+### delete user
+DELETE http://localhost:5000/user-api/users/69b7b75ae2776038a96d2a67
+
+
+### Logout
+GET http://localhost:5000/common-api/logout

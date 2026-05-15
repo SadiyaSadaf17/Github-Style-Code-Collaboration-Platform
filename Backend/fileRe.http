@@ -1,0 +1,28 @@
+### Create file
+POST http://localhost:5000/file-api/repos/69b7cd6d0ffac822fe496890/files
+Content-Type: application/json
+
+{
+  "path": "src/index.js",
+  "content": "console.log('hello')"
+}
+
+### get all repo files
+GET http://localhost:5000/file-api/repos/69b7cd6d0ffac822fe496890/files
+
+### Get single file
+GET http://localhost:5000/file-api/repos/69b7cd6d0ffac822fe496890/file?path=src/index.js
+
+
+### Update file
+PATCH http://localhost:5000/file-api/repos/69b7cd6d0ffac822fe496890/file?path=src/index.js
+Content-Type: application/json  
+
+{
+  "content": "console.log('updated code')"
+}
+
+
+### Delete File
+DELETE http://localhost:5000/file-api/repos/69b7cd6d0ffac822fe496890/file?path=src/index.js
+

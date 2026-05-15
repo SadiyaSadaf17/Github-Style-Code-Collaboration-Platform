@@ -1,0 +1,16 @@
+### create commit
+POST http://localhost:5000/commit-api/repos/69b7cd6d0ffac822fe496890/commits
+Content-Type: application/json
+
+{
+  "authorId": "69b7c25500d94be72c2dbf88",
+  "message": "Added login feature",
+  "files": ["src/login.js"]
+}
+
+### GET ALL Commits of repo
+GET http://localhost:5000/commit-api/repos/69b7cd6d0ffac822fe496890/commits  
+
+
+### get single commit of repo 
+GET http://localhost:5000/commit-api/repos/69b7cd6d0ffac822fe496890/commits/69b8d09dfa5942189440b397

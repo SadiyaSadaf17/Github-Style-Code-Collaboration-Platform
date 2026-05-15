@@ -1,0 +1,26 @@
+### create issue
+POST http://localhost:5000/issue-api/repos/69b7cd6d0ffac822fe496890/issues  
+Content-Type: application/json 
+
+{
+  "authorId": "69b7c25500d94be72c2dbf88",
+  "title": "Login not working",
+  "description": "Error when submitting login form"
+}
+
+
+### get all issues 
+GET http://localhost:5000/issue-api/repos/69b7cd6d0ffac822fe496890/issues
+
+
+### get single issue
+GET http://localhost:5000/issue-api/repos/69b7cd6d0ffac822fe496890/issues/69b8de72454b0937bd76c28d 
+
+
+### Update issue 
+PATCH http://localhost:5000/issue-api/repos/69b7cd6d0ffac822fe496890/issues/69b8de72454b0937bd76c28d
+Content-Type: application/json 
+
+{
+    "description": "Error when submitting login form updated"
+}

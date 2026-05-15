@@ -1,0 +1,5 @@
+### Get notification
+GET http://localhost:5000/notification-api/notifications 
+
+### mark read notification
+PATCH http://localhost:5000/notification-api/notifications/:id/read

@@ -1,0 +1,31 @@
+### create pull request 
+POST http://localhost:5000/pull-api/repos/69b7cd6d0ffac822fe496890/pulls
+Content-Type: application/json 
+
+{
+  "authorId": "69b7c25500d94be72c2dbf88",
+  "title": "Add authentication feature",
+  "fromBranch": "feature/auth",
+  "toBranch": "main",
+  "description": "This PR adds login and register"
+}
+
+### get all pull requests 
+GET http://localhost:5000/pull-api/repos/69b7cd6d0ffac822fe496890/pulls  
+
+
+### get single pull request 
+GET http://localhost:5000/pull-api/repos/69b7cd6d0ffac822fe496890/pulls/69b8d78f86cad0e53bbef1bd
+
+
+### update pull requests 
+PATCH http://localhost:5000/pull-api/repos/69b7cd6d0ffac822fe496890/pulls/69b8d78f86cad0e53bbef1bd
+Content-Type: application/json
+
+{
+    "description":"This PR updates adds login and register"
+}
+
+
+### merge pull requests 
+POST http://localhost:5000/pull-api/repos/69b7cd6d0ffac822fe496890/pulls/69b8d78f86cad0e53bbef1bd/merge
