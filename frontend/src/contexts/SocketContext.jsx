@@ -1,99 +1,116 @@
-import React, { createContext, useContext, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useCallback, useMemo, useState } from 'react';
 import { io } from 'socket.io-client';
 
-const SocketContext = createContext();
+const SocketContext = createContext(null);
 
 export const useSocket = () => {
-  const context = useContext(SocketContext);
-  if (!context) {
+  const ctx = useContext(SocketContext);
+  if (!ctx) {
     throw new Error('useSocket must be used within a SocketProvider');
   }
-  return context;
+  return ctx;
 };
 
 export const SocketProvider = ({ children }) => {
-  const socketRef = useRef();
+  const socketRef = useRef(null);
+  const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    // Connect to Socket.io server
     const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
-    socketRef.current = io(backendUrl, {
+    const s = io(backendUrl, {
       withCredentials: true,
-      transports: ['websocket', 'polling']
+      transports: ['websocket', 'polling'],
     });
+    socketRef.current = s;
 
-    // Connection event handlers
-    socketRef.current.on('connect', () => {
-      console.log('Connected to server:', socketRef.current.id);
-      
-      // Join user room for notifications if user is logged in
-      const user = JSON.parse(localStorage.getItem('user'));
-      if (user && user._id) {
-        socketRef.current.emit('join-user', user._id);
-        console.log(`Joined user room: ${user._id}`);
+    const joinUserRoom = () => {
+      try {
+        const raw = localStorage.getItem('user');
+        if (!raw) return;
+        const u = JSON.parse(raw);
+        const id = u?._id ?? u?.id;
+        if (id) {
+          s.emit('join-user', String(id));
+        }
+      } catch (_) {
+        /* ignore */
       }
+    };
+
+    s.on('connect', () => {
+      setConnected(true);
+      joinUserRoom();
     });
 
-    socketRef.current.on('disconnect', () => {
-      console.log('Disconnected from server');
+    s.on('disconnect', () => {
+      setConnected(false);
     });
 
-    socketRef.current.on('connect_error', (error) => {
-      console.error('Connection error:', error);
-    });
+    joinUserRoom();
 
-    // Cleanup on unmount
+    const onAuthOrStorage = () => joinUserRoom();
+    window.addEventListener('app-auth-changed', onAuthOrStorage);
+    window.addEventListener('storage', onAuthOrStorage);
+
     return () => {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-      }
+      window.removeEventListener('app-auth-changed', onAuthOrStorage);
+      window.removeEventListener('storage', onAuthOrStorage);
+      s.disconnect();
+      socketRef.current = null;
+      setConnected(false);
     };
   }, []);
 
-  // Socket methods
-  const joinRepo = (repoId) => {
-    if (socketRef.current) {
-      socketRef.current.emit('join-repo', repoId);
+  const getSocket = useCallback(() => socketRef.current, []);
+
+  /** Subscribe to a socket event; returns unsubscribe function. */
+  const subscribe = useCallback((event, handler) => {
+    const inst = socketRef.current;
+    if (inst) {
+      inst.on(event, handler);
     }
-  };
+    return () => {
+      socketRef.current?.off(event, handler);
+    };
+  }, []);
 
-  const leaveRepo = (repoId) => {
-    if (socketRef.current) {
-      socketRef.current.emit('leave-repo', repoId);
-    }
-  };
+  const joinRepo = useCallback((repoId) => {
+    if (repoId == null) return;
+    socketRef.current?.emit('join-repo', String(repoId));
+  }, []);
 
-  const emit = (event, data) => {
-    if (socketRef.current) {
-      socketRef.current.emit(event, data);
-    }
-  };
+  const leaveRepo = useCallback((repoId) => {
+    if (repoId == null) return;
+    socketRef.current?.emit('leave-repo', String(repoId));
+  }, []);
 
-  const on = (event, callback) => {
-    if (socketRef.current) {
-      socketRef.current.on(event, callback);
-    }
-  };
+  const emit = useCallback((event, data) => {
+    socketRef.current?.emit(event, data);
+  }, []);
 
-  const off = (event, callback) => {
-    if (socketRef.current) {
-      socketRef.current.off(event, callback);
-    }
-  };
+  /** Prefer subscribe(); legacy helpers */
+  const on = useCallback((event, handler) => {
+    socketRef.current?.on(event, handler);
+  }, []);
 
-  const value = {
-    socket: socketRef.current,
-    joinRepo,
-    leaveRepo,
-    emit,
-    on,
-    off,
-    isConnected: socketRef.current?.connected || false
-  };
+  const off = useCallback((event, handler) => {
+    socketRef.current?.off(event, handler);
+  }, []);
 
-  return (
-    <SocketContext.Provider value={value}>
-      {children}
-    </SocketContext.Provider>
+  const value = useMemo(
+    () => ({
+      connected,
+      getSocket,
+      subscribe,
+      joinRepo,
+      leaveRepo,
+      emit,
+      on,
+      off,
+      socket: socketRef.current,
+    }),
+    [connected, getSocket, subscribe, joinRepo, leaveRepo, emit, on, off]
   );
+
+  return <SocketContext.Provider value={value}>{children}</SocketContext.Provider>;
 };

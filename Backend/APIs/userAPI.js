@@ -1,10 +1,19 @@
 import exp from "express";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
+import { config } from "dotenv";
 import { register, authenticate } from "../services/authService.js";
 import { verifyToken } from "../middlewares/verifyToken.js";
 import { UserTypeModel } from "../models/userModel.js";
 import fileService from "../services/fileService.js";
+import notificationService from "../services/notificationService.js";
+
+config();
 
 export const userRoute = exp.Router();
+
+const PASSWORD_RESET_PURPOSE = "password-reset";
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
 
 const PROFILE_FIELDS = ["name", "bio", "location", "website", "company", "avatar", "preferences"];
 
@@ -52,6 +61,155 @@ userRoute.post("/login", async (req, res) => {
 userRoute.post("/logout", (req, res) => {
   res.clearCookie('token');
   res.status(200).json({ message: "Logout successful" });
+});
+
+/** Request password reset link (email). OAuth-only accounts are skipped silently. */
+userRoute.post("/users/forgot-password", async (req, res) => {
+  try {
+    const email = (req.body.email || "").trim().toLowerCase();
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" });
+    }
+
+    const user = await UserTypeModel.findOne({ email });
+    const generic =
+      "If an account exists for that email, you will receive reset instructions shortly.";
+
+    if (!user || !user.password) {
+      return res.status(200).json({ message: generic });
+    }
+
+    const token = jwt.sign(
+      { userId: user._id.toString(), purpose: PASSWORD_RESET_PURPOSE },
+      process.env.JWT_SECRET,
+      { expiresIn: "1h" }
+    );
+
+    const resetLink = `${FRONTEND_URL.replace(/\/$/, "")}/reset-password?token=${encodeURIComponent(token)}`;
+
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[dev] Password reset link:", resetLink);
+    }
+
+    await notificationService.sendEmail(
+      user.email,
+      "Reset your password",
+      `<p>Hi ${user.name || user.username},</p><p><a href="${resetLink}">Click here to reset your password</a>.</p><p>This link expires in one hour.</p>`,
+      `Reset your password: ${resetLink}`
+    );
+
+    const payload = { message: generic };
+    if (process.env.NODE_ENV !== "production") {
+      payload.devResetLink = resetLink;
+    }
+    res.status(200).json(payload);
+  } catch (err) {
+    console.error("forgot-password", err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+/** Complete password reset using token from email */
+userRoute.post("/users/reset-password", async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+    if (!token || !newPassword) {
+      return res.status(400).json({ message: "token and newPassword are required" });
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ message: "Password must be at least 8 characters" });
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch {
+      return res.status(400).json({ message: "Invalid or expired reset link. Request a new one." });
+    }
+
+    if (decoded.purpose !== PASSWORD_RESET_PURPOSE || !decoded.userId) {
+      return res.status(400).json({ message: "Invalid reset token" });
+    }
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    const updated = await UserTypeModel.findByIdAndUpdate(decoded.userId, {
+      password: hashed,
+      passwordResetToken: undefined,
+      passwordResetExpires: undefined,
+    });
+
+    if (!updated) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.status(200).json({ message: "Password updated. You can sign in now." });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+/** Change password while logged in */
+userRoute.patch("/users/me/password", verifyToken("user"), async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: "currentPassword and newPassword are required" });
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ message: "New password must be at least 8 characters" });
+    }
+
+    const user = await UserTypeModel.findById(req.user.userId);
+    if (!user || !user.password) {
+      return res.status(400).json({ message: "Password login is not enabled for this account" });
+    }
+
+    const ok = await bcrypt.compare(currentPassword, user.password);
+    if (!ok) {
+      return res.status(401).json({ message: "Current password is incorrect" });
+    }
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    await user.save();
+
+    res.status(200).json({ message: "Password changed successfully" });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+/** Change email (re-login may be required for JWT cookie identity; email in DB updates) */
+userRoute.patch("/users/me/email", verifyToken("user"), async (req, res) => {
+  try {
+    const { newEmail, currentPassword } = req.body;
+    const email = (newEmail || "").trim().toLowerCase();
+    if (!email || !currentPassword) {
+      return res.status(400).json({ message: "newEmail and currentPassword are required" });
+    }
+
+    const user = await UserTypeModel.findById(req.user.userId);
+    if (!user || !user.password) {
+      return res.status(400).json({ message: "Email change requires a password-protected account" });
+    }
+
+    const ok = await bcrypt.compare(currentPassword, user.password);
+    if (!ok) {
+      return res.status(401).json({ message: "Current password is incorrect" });
+    }
+
+    const taken = await UserTypeModel.findOne({ email, _id: { $ne: user._id } });
+    if (taken) {
+      return res.status(400).json({ message: "That email is already in use" });
+    }
+
+    user.email = email;
+    await user.save();
+
+    const fresh = await UserTypeModel.findById(user._id).select("-password").lean();
+    res.status(200).json({ message: "Email updated", payload: fresh });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 });
 
 

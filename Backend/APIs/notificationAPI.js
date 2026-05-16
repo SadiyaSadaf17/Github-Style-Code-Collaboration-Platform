@@ -4,6 +4,19 @@ import { verifyToken } from "../middlewares/verifyToken.js";
 
 export const notificationRoute = exp.Router();
 
+//Mark all notifications read
+notificationRoute.patch("/notifications/read-all", verifyToken("user"), async (req, res) => {
+  try {
+    await NotificationModel.updateMany(
+      { recipient: req.user.userId, read: { $ne: true } },
+      { read: true }
+    );
+    res.status(200).json({ message: "all notifications marked read" });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // get notification
 notificationRoute.get("/notifications", verifyToken("user"), async (req, res) => {
   try {

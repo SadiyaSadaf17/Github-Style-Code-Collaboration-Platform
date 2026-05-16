@@ -14,7 +14,7 @@ function IssueDetail() {
   const [reviewPath, setReviewPath] = useState('');
   const [reviewLine, setReviewLine] = useState('');
   const [reviewSide, setReviewSide] = useState('RIGHT');
-  const { joinRepo, leaveRepo, on, off } = useSocket();
+  const { joinRepo, leaveRepo, subscribe } = useSocket();
 
   const loadComments = useCallback(async () => {
     const commentRes = await axios.get(`http://localhost:5001/comment-api/issues/${issueId}/comments`, {
@@ -51,15 +51,14 @@ function IssueDetail() {
   useEffect(() => {
     if (!repoId) return;
     joinRepo(repoId);
-    const handler = (data) => {
+    const unsub = subscribe('issue:comment', (data) => {
       if (data?.issueId === issueId) loadComments();
-    };
-    on('issue:comment', handler);
+    });
     return () => {
-      off('issue:comment', handler);
+      unsub();
       leaveRepo(repoId);
     };
-  }, [repoId, issueId, joinRepo, leaveRepo, on, off, loadComments]);
+  }, [repoId, issueId, joinRepo, leaveRepo, subscribe, loadComments]);
 
   const handleAddComment = async () => {
     if (!newComment.trim()) return;

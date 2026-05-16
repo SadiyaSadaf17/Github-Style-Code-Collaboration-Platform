@@ -6,7 +6,7 @@ import { useSocket } from '../contexts/SocketContext';
 function Notification() {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
-  const { socket, on, off } = useSocket();
+  const { subscribe } = useSocket();
 
   useEffect(() => {
     const fetchNotifications = async () => {
@@ -24,25 +24,32 @@ function Notification() {
     fetchNotifications();
   }, []);
 
-  // Listen for real-time notifications
   useEffect(() => {
-    const handleNewNotification = (data) => {
-      setNotifications(prev => [data.notification, ...prev]);
-    };
+    const unsub = subscribe('notification:new', (data) => {
+      if (data?.notification) {
+        setNotifications((prev) => [data.notification, ...prev]);
+      }
+    });
+    return unsub;
+  }, [subscribe]);
 
-    on('notification:new', handleNewNotification);
-
-    return () => {
-      off('notification:new', handleNewNotification);
-    };
-  }, [on, off]);
+  const markAllRead = async () => {
+    try {
+      await axios.patch('http://localhost:5001/notification-api/notifications/read-all', {}, {
+        withCredentials: true,
+      });
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   const markAsRead = async (id) => {
     try {
       await axios.patch(`http://localhost:5001/notification-api/notifications/${id}/read`, {}, {
         withCredentials: true
       });
-      setNotifications(notifications.map(n => n._id === id ? { ...n, read: true } : n));
+      setNotifications((prev) => prev.map((n) => (n._id === id ? { ...n, read: true } : n)));
     } catch (err) {
       console.error("Error marking as read", err);
     }
@@ -52,10 +59,21 @@ function Notification() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-semibold mb-6 flex items-center gap-2">
-        <Bell size={24} />
-        Notifications
-      </h1>
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <h1 className="text-2xl font-semibold flex items-center gap-2">
+          <Bell size={24} />
+          Notifications
+        </h1>
+        {notifications.some((n) => !n.read) && (
+          <button
+            type="button"
+            onClick={markAllRead}
+            className="text-sm px-3 py-1.5 border border-gray-300 rounded-md hover:bg-gray-50"
+          >
+            Mark all as read
+          </button>
+        )}
+      </div>
       <div className="space-y-4">
         {notifications.map((notif) => (
           <div key={notif._id} className={`p-4 border rounded-md ${notif.read ? 'bg-gray-50' : 'bg-white border-blue-200'}`}>

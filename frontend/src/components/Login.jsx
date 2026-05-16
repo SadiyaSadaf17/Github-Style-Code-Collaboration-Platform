@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { Github, AlertCircle } from 'lucide-react';
 
 function Login() {
@@ -9,6 +9,8 @@ function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+  const flash = location.state?.message;
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -23,6 +25,8 @@ function Login() {
 
       // Store only UI-related info; the cookie handles security
       localStorage.setItem('user', JSON.stringify(response.data.user));
+
+      window.dispatchEvent(new Event('app-auth-changed'));
 
       navigate('/');
       window.location.reload(); 
@@ -41,6 +45,12 @@ function Login() {
       
       <div className="w-full max-w-[340px] p-5 bg-white border border-[#d0d7de] rounded-md shadow-sm">
         <h1 className="text-2xl font-light text-center mb-4 text-[#1f2328]">Sign in to GitHub Clone</h1>
+
+        {flash && (
+          <div className="p-3 mb-4 text-sm text-green-800 bg-green-50 border border-green-200 rounded-md">
+            {flash}
+          </div>
+        )}
 
         {error && (
           <div className="flex items-center gap-2 p-3 mb-4 text-sm text-red-800 bg-red-50 border border-red-200 rounded-md">
@@ -66,7 +76,7 @@ function Login() {
           <div>
             <div className="flex justify-between items-center mb-2">
               <label htmlFor="password" className="text-sm font-normal text-[#1f2328]">Password</label>
-              <a href="#" className="text-xs text-[#0969da] hover:underline">Forgot password?</a>
+              <Link to="/forgot-password" className="text-xs text-[#0969da] hover:underline">Forgot password?</Link>
             </div>
             <input 
               id="password"

@@ -13,19 +13,20 @@ const MonacoEditor = ({
   height = '400px'
 }) => {
   const editorRef = useRef(null);
-  const { socket, emit, on, off } = useSocket();
+  const { getSocket, emit, subscribe, joinRepo, leaveRepo } = useSocket();
   const [isCollaborating, setIsCollaborating] = useState(false);
   const [collaborators, setCollaborators] = useState([]);
 
   useEffect(() => {
-    if (!socket || !repoId) return;
+    if (!repoId) return;
 
-    // Join repository room for collaboration
-    emit('join-repo', repoId);
+    joinRepo(repoId);
 
     // Listen for collaboration events
+    const socketId = getSocket()?.id;
+
     const handleFileEditStart = (data) => {
-      if (data.filePath === filePath && data.userId !== socket.id) {
+      if (data.filePath === filePath && data.userId !== socketId) {
         setIsCollaborating(true);
         setCollaborators(prev => [...prev.filter(c => c.id !== data.userId), {
           id: data.userId,
@@ -36,7 +37,7 @@ const MonacoEditor = ({
     };
 
     const handleFileEditUpdate = (data) => {
-      if (data.filePath === filePath && data.userId !== socket.id) {
+      if (data.filePath === filePath && data.userId !== socketId) {
         // Handle real-time content sync
         // This would require Operational Transforms for proper sync
         console.log('Collaborative edit:', data);
@@ -44,7 +45,7 @@ const MonacoEditor = ({
     };
 
     const handleFileEditEnd = (data) => {
-      if (data.filePath === filePath && data.userId !== socket.id) {
+      if (data.filePath === filePath && data.userId !== socketId) {
         setCollaborators(prev => prev.filter(c => c.id !== data.userId));
         if (collaborators.length <= 1) {
           setIsCollaborating(false);
@@ -53,7 +54,7 @@ const MonacoEditor = ({
     };
 
     const handlePresenceJoin = (data) => {
-      if (data.userId !== socket.id) {
+      if (data.userId !== socketId) {
         setCollaborators(prev => [...prev, {
           id: data.userId,
           name: data.username || 'Anonymous',
@@ -66,21 +67,19 @@ const MonacoEditor = ({
       setCollaborators(prev => prev.filter(c => c.id !== data.userId));
     };
 
-    on('file:edit:start', handleFileEditStart);
-    on('file:edit:update', handleFileEditUpdate);
-    on('file:edit:end', handleFileEditEnd);
-    on('presence:join', handlePresenceJoin);
-    on('presence:leave', handlePresenceLeave);
+    const unsubs = [
+      subscribe('file:edit:start', handleFileEditStart),
+      subscribe('file:edit:update', handleFileEditUpdate),
+      subscribe('file:edit:end', handleFileEditEnd),
+      subscribe('presence:join', handlePresenceJoin),
+      subscribe('presence:leave', handlePresenceLeave),
+    ];
 
     return () => {
-      off('file:edit:start', handleFileEditStart);
-      off('file:edit:update', handleFileEditUpdate);
-      off('file:edit:end', handleFileEditEnd);
-      off('presence:join', handlePresenceJoin);
-      off('presence:leave', handlePresenceLeave);
-      emit('leave-repo', repoId);
+      unsubs.forEach((u) => u());
+      leaveRepo(repoId);
     };
-  }, [socket, repoId, filePath, emit, on, off]);
+  }, [repoId, filePath, getSocket, subscribe, joinRepo, leaveRepo]);
 
   const handleEditorDidMount = (editor, monaco) => {
     editorRef.current = editor;
@@ -108,7 +107,7 @@ const MonacoEditor = ({
     onChange?.(value);
 
     // Emit collaboration event
-    if (socket && repoId && filePath) {
+    if (getSocket()?.connected && repoId && filePath) {
       emit('file:edit:update', {
         repoId,
         filePath,
@@ -119,7 +118,7 @@ const MonacoEditor = ({
   };
 
   const handleEditorFocus = () => {
-    if (socket && repoId && filePath) {
+    if (getSocket()?.connected && repoId && filePath) {
       emit('file:edit:start', {
         repoId,
         filePath,
@@ -129,7 +128,7 @@ const MonacoEditor = ({
   };
 
   const handleEditorBlur = () => {
-    if (socket && repoId && filePath) {
+    if (getSocket()?.connected && repoId && filePath) {
       emit('file:edit:end', {
         repoId,
         filePath

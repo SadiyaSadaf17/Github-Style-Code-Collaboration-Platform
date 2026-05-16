@@ -14,7 +14,7 @@ function PullRequestDetail() {
   const [reviewPath, setReviewPath] = useState('');
   const [reviewLine, setReviewLine] = useState('');
   const [reviewSide, setReviewSide] = useState('RIGHT');
-  const { joinRepo, leaveRepo, on, off } = useSocket();
+  const { joinRepo, leaveRepo, subscribe } = useSocket();
 
   const loadComments = useCallback(async () => {
     const commentRes = await axios.get(`http://localhost:5001/comment-api/pulls/${prId}/comments`, {
@@ -49,17 +49,14 @@ function PullRequestDetail() {
   useEffect(() => {
     if (!repoId) return;
     joinRepo(repoId);
-    const handleReviewComment = (data) => {
-      if (data?.pullRequestId === prId) {
-        loadComments();
-      }
-    };
-    on('review:comment', handleReviewComment);
+    const unsub = subscribe('review:comment', (data) => {
+      if (data?.pullRequestId === prId) loadComments();
+    });
     return () => {
-      off('review:comment', handleReviewComment);
+      unsub();
       leaveRepo(repoId);
     };
-  }, [repoId, prId, joinRepo, leaveRepo, on, off, loadComments]);
+  }, [repoId, prId, joinRepo, leaveRepo, subscribe, loadComments]);
 
   const canWrite = repoInfo?.currentUserRole === 'owner' || repoInfo?.currentUserRole === 'collaborator';
 

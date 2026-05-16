@@ -66,6 +66,24 @@ repoRoute.get("/repos", verifyToken("user"), async (req, res) => {
   }
 });
 
+// Public repositories (Explore) — no auth required
+repoRoute.get("/repos/explore/public", async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 50, 100);
+    const repos = await RepoModel.find({ isPrivate: false })
+      .populate("owner", "name username avatar")
+      .sort({ updatedAt: -1 })
+      .limit(limit);
+
+    res.status(200).json({
+      message: "public repositories fetched",
+      payload: repos,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // get single repository (public read OK; private requires team membership)
 repoRoute.get(
   "/repos/:id",

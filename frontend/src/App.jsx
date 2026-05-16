@@ -10,6 +10,8 @@ import RootLayout from './components/RootLayout';
 // Pages
 import Dashboard from './components/Dashboard';
 import Login from './components/Login';
+import ForgotPassword from './components/ForgotPassword';
+import ResetPassword from './components/ResetPassword';
 import Signup from './components/Signup';
 import CreateRepo from './components/CreateRepo';
 import Profile from './components/Profile';
@@ -46,6 +48,14 @@ function App() {
         {
           path: "login",
           element: <Login />
+        },
+        {
+          path: "forgot-password",
+          element: <ForgotPassword />
+        },
+        {
+          path: "reset-password",
+          element: <ResetPassword />
         },
         {
           path: "signup",

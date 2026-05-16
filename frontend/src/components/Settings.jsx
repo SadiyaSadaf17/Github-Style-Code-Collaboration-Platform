@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../store/authStore.js';
-import { Settings, Mail, Lock, Bell, Palette, Eye } from 'lucide-react';
+import { Settings, Mail, Lock, Bell, Palette } from 'lucide-react';
 import { getUserAvatarUrl } from '../utils/userAvatar.js';
 
 function SettingsPage() {
@@ -20,6 +20,10 @@ function SettingsPage() {
   const [loading, setLoading] = useState(false);
   const [avatarLoading, setAvatarLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [accountFeedback, setAccountFeedback] = useState('');
+  const [accountLoading, setAccountLoading] = useState(false);
+  const [emailForm, setEmailForm] = useState({ newEmail: '', currentPassword: '' });
+  const [pwdForm, setPwdForm] = useState({ current: '', next: '', confirm: '' });
 
   useEffect(() => {
     if (currentUser) {
@@ -325,28 +329,155 @@ function SettingsPage() {
           {activeTab === 'account' && (
             <div className="space-y-6">
               <h2 className="text-2xl font-bold">Account Settings</h2>
-              <div className="border border-gray-200 rounded-md p-6">
-                <div className="flex items-start gap-3 mb-4">
-                  <Mail size={20} className="text-gray-600 mt-1" />
+
+              {accountFeedback && (
+                <div
+                  className={`p-4 rounded-md text-sm ${
+                    accountFeedback.includes('Error') || accountFeedback.includes('incorrect')
+                      ? 'bg-red-100 text-red-800'
+                      : 'bg-green-100 text-green-800'
+                  }`}
+                >
+                  {accountFeedback}
+                </div>
+              )}
+
+              <div className="border border-gray-200 rounded-md p-6 space-y-4">
+                <div className="flex items-start gap-3">
+                  <Mail size={20} className="text-gray-600 mt-1 shrink-0" />
                   <div className="flex-1">
                     <h3 className="font-semibold">Email Address</h3>
-                    <p className="text-gray-600 text-sm mt-1">{currentUser?.email}</p>
-                    <button className="text-blue-600 hover:underline text-sm mt-2">
-                      Change email
-                    </button>
+                    <p className="text-gray-600 text-sm mt-1">Current: {currentUser?.email}</p>
+                    <form
+                      className="mt-4 space-y-3 max-w-md"
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        setAccountLoading(true);
+                        setAccountFeedback('');
+                        try {
+                          const res = await axios.patch(
+                            'http://localhost:5001/user-api/users/me/email',
+                            {
+                              newEmail: emailForm.newEmail.trim(),
+                              currentPassword: emailForm.currentPassword,
+                            },
+                            { withCredentials: true }
+                          );
+                          if (res.data.payload) {
+                            persistUser(res.data.payload);
+                          }
+                          setAccountFeedback(res.data.message || 'Email updated.');
+                          setEmailForm({ newEmail: '', currentPassword: '' });
+                        } catch (err) {
+                          setAccountFeedback(err.response?.data?.message || 'Could not update email');
+                        } finally {
+                          setAccountLoading(false);
+                        }
+                      }}
+                    >
+                      <input
+                        type="email"
+                        placeholder="New email address"
+                        value={emailForm.newEmail}
+                        onChange={(e) => setEmailForm((p) => ({ ...p, newEmail: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                        required
+                      />
+                      <input
+                        type="password"
+                        placeholder="Current password (confirm it’s you)"
+                        value={emailForm.currentPassword}
+                        onChange={(e) => setEmailForm((p) => ({ ...p, currentPassword: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                        autoComplete="current-password"
+                        required
+                      />
+                      <button
+                        type="submit"
+                        disabled={accountLoading}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {accountLoading ? 'Saving…' : 'Change email'}
+                      </button>
+                    </form>
                   </div>
                 </div>
               </div>
 
-              <div className="border border-gray-200 rounded-md p-6">
-                <div className="flex items-start gap-3 mb-4">
-                  <Lock size={20} className="text-gray-600 mt-1" />
+              <div className="border border-gray-200 rounded-md p-6 space-y-4">
+                <div className="flex items-start gap-3">
+                  <Lock size={20} className="text-gray-600 mt-1 shrink-0" />
                   <div className="flex-1">
                     <h3 className="font-semibold">Password</h3>
-                    <p className="text-gray-600 text-sm mt-1">Change your password regularly to keep your account secure</p>
-                    <button className="text-blue-600 hover:underline text-sm mt-2">
-                      Change password
-                    </button>
+                    <p className="text-gray-600 text-sm mt-1">
+                      Use at least 8 characters. You stay signed in until the cookie expires.
+                    </p>
+                    <form
+                      className="mt-4 space-y-3 max-w-md"
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        setAccountLoading(true);
+                        setAccountFeedback('');
+                        if (pwdForm.next !== pwdForm.confirm) {
+                          setAccountFeedback('New passwords do not match.');
+                          setAccountLoading(false);
+                          return;
+                        }
+                        try {
+                          await axios.patch(
+                            'http://localhost:5001/user-api/users/me/password',
+                            {
+                              currentPassword: pwdForm.current,
+                              newPassword: pwdForm.next,
+                            },
+                            { withCredentials: true }
+                          );
+                          setAccountFeedback('Password changed successfully.');
+                          setPwdForm({ current: '', next: '', confirm: '' });
+                        } catch (err) {
+                          setAccountFeedback(err.response?.data?.message || 'Could not change password');
+                        } finally {
+                          setAccountLoading(false);
+                        }
+                      }}
+                    >
+                      <input
+                        type="password"
+                        placeholder="Current password"
+                        value={pwdForm.current}
+                        onChange={(e) => setPwdForm((p) => ({ ...p, current: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                        autoComplete="current-password"
+                        required
+                      />
+                      <input
+                        type="password"
+                        placeholder="New password"
+                        value={pwdForm.next}
+                        onChange={(e) => setPwdForm((p) => ({ ...p, next: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                        autoComplete="new-password"
+                        required
+                        minLength={8}
+                      />
+                      <input
+                        type="password"
+                        placeholder="Confirm new password"
+                        value={pwdForm.confirm}
+                        onChange={(e) => setPwdForm((p) => ({ ...p, confirm: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                        autoComplete="new-password"
+                        required
+                        minLength={8}
+                      />
+                      <button
+                        type="submit"
+                        disabled={accountLoading}
+                        className="px-4 py-2 bg-[#24292f] text-white rounded-md text-sm font-medium hover:bg-black disabled:opacity-50"
+                      >
+                        {accountLoading ? 'Updating…' : 'Change password'}
+                      </button>
+                    </form>
                   </div>
                 </div>
               </div>

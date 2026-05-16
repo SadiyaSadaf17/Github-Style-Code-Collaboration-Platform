@@ -21,10 +21,14 @@ class NotificationService {
       const notification = new NotificationModel(data);
       await notification.save();
 
-      // Emit real-time notification via Socket.io
-      if (global.io) {
-        global.io.to(`user:${data.recipient}`).emit('notification:new', {
-          notification: notification.toObject()
+      // Emit real-time notification via Socket.io (room key must match join-user id string)
+      if (global.io && data.recipient != null) {
+        const roomId =
+          typeof data.recipient === "object" && data.recipient.toString
+            ? data.recipient.toString()
+            : String(data.recipient);
+        global.io.to(`user:${roomId}`).emit("notification:new", {
+          notification: notification.toObject(),
         });
       }
 

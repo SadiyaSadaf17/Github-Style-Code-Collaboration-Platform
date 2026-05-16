@@ -21,6 +21,8 @@ export const useAuth = create((set) => ({
 
       localStorage.setItem("user", JSON.stringify(user));
 
+      window.dispatchEvent(new Event("app-auth-changed"));
+
       set({
         loading: false,
         error: null,
@@ -47,6 +49,7 @@ export const useAuth = create((set) => ({
       await axios.post(`${API_URL}/logout`, {}, { withCredentials: true });
 
       localStorage.removeItem("user");
+      window.dispatchEvent(new Event("app-auth-changed"));
 
       set({
         currentUser: null,
@@ -67,6 +70,7 @@ export const useAuth = create((set) => ({
     } else {
       localStorage.removeItem("user");
     }
+    window.dispatchEvent(new Event("app-auth-changed"));
     set({
       currentUser: user,
       isAuthenticated: !!user,

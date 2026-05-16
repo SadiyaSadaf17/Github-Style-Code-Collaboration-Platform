@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Github, Plus, Bell, ChevronDown } from 'lucide-react';
+import { Github, Plus, ChevronDown } from 'lucide-react';
+import NotificationBell from './NotificationBell.jsx';
 import { useAuth } from '../store/authStore.js';
 import { getUserAvatarUrl } from '../utils/userAvatar.js';
 
@@ -40,9 +41,7 @@ function Header() {
         {isAuthenticated ? (
           <>
             <div className="flex items-center gap-3">
-              <Link to="/notifications" className="hover:text-blue-400">
-                <Bell size={20} />
-              </Link>
+              <NotificationBell />
               <Link to="/new" className="flex items-center gap-1 hover:text-blue-400">
                 <Plus size={20} />
                 <ChevronDown size={14} />
