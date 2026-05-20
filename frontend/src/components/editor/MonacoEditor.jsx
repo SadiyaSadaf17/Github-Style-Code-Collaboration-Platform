@@ -1,6 +1,16 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import Editor from '@monaco-editor/react';
 import { useSocket } from '../../contexts/SocketContext';
+import { useAuth } from '../../store/authStore';
+
+const COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#DDA0DD', '#85C1E9'];
+
+function pickColor(id) {
+  let hash = 0;
+  const s = String(id || '');
+  for (let i = 0; i < s.length; i += 1) hash = s.charCodeAt(i) + ((hash << 5) - hash);
+  return COLORS[Math.abs(hash) % COLORS.length];
+}
 
 const MonacoEditor = ({
   value,
@@ -10,153 +20,186 @@ const MonacoEditor = ({
   repoId,
   filePath,
   readOnly = false,
-  height = '400px'
+  height = '400px',
+  onSave,
 }) => {
   const editorRef = useRef(null);
+  const monacoRef = useRef(null);
+  const decorationsRef = useRef([]);
+  const remoteApplyRef = useRef(false);
+  const emitTimerRef = useRef(null);
+  const versionRef = useRef(0);
+
   const { getSocket, emit, subscribe, joinRepo, leaveRepo } = useSocket();
-  const [isCollaborating, setIsCollaborating] = useState(false);
+  const { currentUser } = useAuth();
   const [collaborators, setCollaborators] = useState([]);
 
+  const displayName = currentUser?.username || currentUser?.name || 'You';
+  const authUserId = currentUser?._id || currentUser?.id;
+
   useEffect(() => {
-    if (!repoId) return;
+    if (!repoId) return undefined;
 
     joinRepo(repoId);
+    emit('presence:join', {
+      repoId,
+      username: displayName,
+      userId: authUserId,
+      filePath,
+    });
 
-    // Listen for collaboration events
     const socketId = getSocket()?.id;
 
-    const handleFileEditStart = (data) => {
-      if (data.filePath === filePath && data.userId !== socketId) {
-        setIsCollaborating(true);
-        setCollaborators(prev => [...prev.filter(c => c.id !== data.userId), {
-          id: data.userId,
-          name: data.username || 'Anonymous',
-          color: getRandomColor()
-        }]);
-      }
-    };
-
     const handleFileEditUpdate = (data) => {
-      if (data.filePath === filePath && data.userId !== socketId) {
-        // Handle real-time content sync
-        // This would require Operational Transforms for proper sync
-        console.log('Collaborative edit:', data);
-      }
-    };
+      if (data.filePath !== filePath) return;
+      if (data.userId === socketId || data.authUserId === authUserId) return;
+      if (data.content == null) return;
 
-    const handleFileEditEnd = (data) => {
-      if (data.filePath === filePath && data.userId !== socketId) {
-        setCollaborators(prev => prev.filter(c => c.id !== data.userId));
-        if (collaborators.length <= 1) {
-          setIsCollaborating(false);
-        }
+      const editor = editorRef.current;
+      if (!editor) return;
+
+      remoteApplyRef.current = true;
+      const model = editor.getModel();
+      if (model) {
+        editor.executeEdits('remote', [
+          {
+            range: model.getFullModelRange(),
+            text: data.content,
+          },
+        ]);
+        onChange?.(data.content);
+      }
+      remoteApplyRef.current = false;
+
+      if (data.cursor && data.userId) {
+        const deco = editor.deltaDecorations(decorationsRef.current, [
+          {
+            range: new monacoRef.current.Range(
+              data.cursor.lineNumber,
+              data.cursor.column,
+              data.cursor.lineNumber,
+              data.cursor.column + 1
+            ),
+            options: {
+              className: 'collab-cursor-line',
+              beforeContentClassName: 'collab-cursor-label',
+              hoverMessage: { value: data.username || 'Collaborator' },
+            },
+          },
+        ]);
+        decorationsRef.current = deco;
       }
     };
 
     const handlePresenceJoin = (data) => {
-      if (data.userId !== socketId) {
-        setCollaborators(prev => [...prev, {
-          id: data.userId,
-          name: data.username || 'Anonymous',
-          color: getRandomColor()
-        }]);
-      }
+      if (data.socketId === socketId) return;
+      setCollaborators((prev) => {
+        const id = data.socketId || data.userId;
+        if (prev.some((c) => c.id === id)) return prev;
+        return [
+          ...prev,
+          {
+            id,
+            name: data.username || 'Guest',
+            color: pickColor(id),
+          },
+        ];
+      });
     };
 
     const handlePresenceLeave = (data) => {
-      setCollaborators(prev => prev.filter(c => c.id !== data.userId));
+      const id = data.socketId || data.userId;
+      setCollaborators((prev) => prev.filter((c) => c.id !== id));
     };
 
     const unsubs = [
-      subscribe('file:edit:start', handleFileEditStart),
       subscribe('file:edit:update', handleFileEditUpdate),
-      subscribe('file:edit:end', handleFileEditEnd),
       subscribe('presence:join', handlePresenceJoin),
       subscribe('presence:leave', handlePresenceLeave),
     ];
 
     return () => {
+      emit('presence:leave', { repoId, userId: authUserId, filePath });
       unsubs.forEach((u) => u());
       leaveRepo(repoId);
     };
-  }, [repoId, filePath, getSocket, subscribe, joinRepo, leaveRepo]);
+  }, [repoId, filePath, displayName, authUserId, joinRepo, leaveRepo, emit, subscribe, getSocket, onChange]);
+
+  const scheduleEmit = useCallback(
+    (content, cursor) => {
+      if (remoteApplyRef.current || !getSocket()?.connected) return;
+      clearTimeout(emitTimerRef.current);
+      emitTimerRef.current = setTimeout(() => {
+        versionRef.current += 1;
+        emit('file:edit:update', {
+          repoId,
+          filePath,
+          content,
+          cursor,
+          username: displayName,
+          authUserId,
+          version: versionRef.current,
+        });
+      }, 120);
+    },
+    [repoId, filePath, displayName, authUserId, emit, getSocket]
+  );
 
   const handleEditorDidMount = (editor, monaco) => {
     editorRef.current = editor;
+    monacoRef.current = monaco;
 
-    // Configure editor options
     editor.updateOptions({
       fontSize: 14,
       minimap: { enabled: true },
       scrollBeyondLastLine: false,
       automaticLayout: true,
       wordWrap: 'on',
-      lineNumbers: 'on',
-      renderWhitespace: 'selection',
-      bracketPairColorization: { enabled: true }
     });
 
-    // Add keyboard shortcuts
+    editor.onDidChangeCursorPosition((e) => {
+      if (remoteApplyRef.current) return;
+      scheduleEmit(editor.getValue(), e.position);
+    });
+
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      // Handle save
-      console.log('Save triggered');
+      onSave?.(editor.getValue());
+    });
+
+    emit('file:edit:start', {
+      repoId,
+      filePath,
+      username: displayName,
+      authUserId,
     });
   };
 
-  const handleEditorChange = (value) => {
-    onChange?.(value);
-
-    // Emit collaboration event
-    if (getSocket()?.connected && repoId && filePath) {
-      emit('file:edit:update', {
-        repoId,
-        filePath,
-        content: value,
-        cursor: editorRef.current?.getPosition()
-      });
-    }
-  };
-
-  const handleEditorFocus = () => {
-    if (getSocket()?.connected && repoId && filePath) {
-      emit('file:edit:start', {
-        repoId,
-        filePath,
-        username: 'Current User' // This should come from auth context
-      });
-    }
+  const handleEditorChange = (newValue) => {
+    if (remoteApplyRef.current) return;
+    onChange?.(newValue);
+    const pos = editorRef.current?.getPosition();
+    scheduleEmit(newValue, pos);
   };
 
   const handleEditorBlur = () => {
-    if (getSocket()?.connected && repoId && filePath) {
-      emit('file:edit:end', {
-        repoId,
-        filePath
-      });
-    }
+    emit('file:edit:end', { repoId, filePath, authUserId });
   };
 
   return (
     <div className="relative">
-      {/* Collaboration indicator */}
-      {isCollaborating && (
-        <div className="absolute top-2 right-2 z-10 bg-green-500 text-white px-2 py-1 rounded text-xs">
-          {collaborators.length} collaborator{collaborators.length > 1 ? 's' : ''} active
+      {collaborators.length > 0 && (
+        <div className="absolute top-2 right-2 z-10 flex flex-wrap gap-1 max-w-[50%] justify-end">
+          {collaborators.map((c) => (
+            <span
+              key={c.id}
+              className="text-xs px-2 py-0.5 rounded-full text-white"
+              style={{ backgroundColor: c.color }}
+            >
+              {c.name}
+            </span>
+          ))}
         </div>
       )}
-
-      {/* Collaborator cursors would go here */}
-      <div className="collaborator-cursors">
-        {collaborators.map(collaborator => (
-          <div
-            key={collaborator.id}
-            className="collaborator-cursor"
-            style={{ borderColor: collaborator.color }}
-          >
-            {collaborator.name}
-          </div>
-        ))}
-      </div>
 
       <Editor
         height={height}
@@ -165,6 +208,7 @@ const MonacoEditor = ({
         theme={theme}
         onChange={handleEditorChange}
         onMount={handleEditorDidMount}
+        onBlur={handleEditorBlur}
         options={{
           readOnly,
           automaticLayout: true,
@@ -172,24 +216,10 @@ const MonacoEditor = ({
           minimap: { enabled: true },
           fontSize: 14,
           wordWrap: 'on',
-          lineNumbers: 'on',
-          renderWhitespace: 'selection',
-          bracketPairColorization: { enabled: true }
         }}
-        onFocus={handleEditorFocus}
-        onBlur={handleEditorBlur}
       />
     </div>
   );
-};
-
-// Utility function for random colors
-const getRandomColor = () => {
-  const colors = [
-    '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
-    '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'
-  ];
-  return colors[Math.floor(Math.random() * colors.length)];
 };
 
 export default MonacoEditor;

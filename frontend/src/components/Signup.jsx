@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import axios from 'axios';
+import api from '../services/api';
+import { useAuth } from '../store/authStore';
 import { useNavigate, Link } from 'react-router-dom';
 import { Github, UserPlus, Info } from 'lucide-react';
 
@@ -22,17 +23,16 @@ function Signup() {
 
     try {
       // Matches your POST http://localhost:4000/user-api/users
-      const response = await axios.post('http://localhost:5001/user-api/users', 
-        formData,
-        { withCredentials: true } // Crucial to receive the HttpOnly cookie
-      );
-      
-      // Store user info (non-sensitive) for UI personalization
-      localStorage.setItem('user', JSON.stringify(response.data.user || response.data.payload));
-
-      alert("Welcome to the community!");
-      navigate('/');
-      window.location.reload(); 
+      await api.post('/user-api/users', formData);
+      const loggedIn = await useAuth.getState().login({
+        email: formData.email,
+        password: formData.password,
+      });
+      if (loggedIn) {
+        navigate('/');
+      } else {
+        navigate('/login', { state: { message: 'Account created. Please sign in.' } });
+      } 
     } catch (err) {
       setError(err.response?.data?.message || 'Registration failed');
     } finally {

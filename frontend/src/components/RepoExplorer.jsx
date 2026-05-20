@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import axios from 'axios';
+import api from '../services/api';
 import { FileText, GitBranch, Plus, MessageSquare, GitPullRequest, GitCommit, Users } from 'lucide-react';
+import FileTree from './explorer/FileTree';
 
 function RepoExplorer() {
   const { repoId } = useParams();
@@ -28,17 +29,15 @@ function RepoExplorer() {
     const fetchRepoData = async () => {
       try {
         setFetchError(null);
-        const repoRes = await axios.get(`http://localhost:5001/repo-api/repos/${repoId}`, {
-          withCredentials: true
-        });
+        const repoRes = await api.get(`/repo-api/repos/${repoId}`);
         const repoPayload = repoRes.data.payload || repoRes.data;
         setRepoInfo(repoPayload);
 
         const [fileRes, issueRes, pullRes, commitRes] = await Promise.all([
-          axios.get(`http://localhost:5001/file-api/repos/${repoId}/files`, { withCredentials: true }),
-          axios.get(`http://localhost:5001/issue-api/repos/${repoId}/issues`, { withCredentials: true }),
-          axios.get(`http://localhost:5001/pull-api/repos/${repoId}/pulls`, { withCredentials: true }),
-          axios.get(`http://localhost:5001/commit-api/repos/${repoId}/commits`, { withCredentials: true })
+          api.get(`/file-api/repos/${repoId}/files`),
+          api.get(`/issue-api/repos/${repoId}/issues`),
+          api.get(`/pull-api/repos/${repoId}/pulls`),
+          api.get(`/commit-api/repos/${repoId}/commits`),
         ]);
 
         setFiles(fileRes.data.payload || fileRes.data || []);
@@ -64,7 +63,7 @@ function RepoExplorer() {
     if (activeTab !== 'team' || !repoId || fetchError) return;
     const loadTeam = async () => {
       try {
-        const res = await axios.get(`http://localhost:5001/repo-api/repos/${repoId}/collaborators`, {
+        const res = await api.get(`/repo-api/repos/${repoId}/collaborators`, {
           withCredentials: true
         });
         setCollaborators(res.data.payload || []);
@@ -79,14 +78,14 @@ function RepoExplorer() {
     e.preventDefault();
     setCreating(true);
     try {
-      await axios.post(`http://localhost:5001/file-api/repos/${repoId}/files`, {
+      await api.post(`/file-api/repos/${repoId}/files`, {
         path: newFilePath,
         content: newFileContent
       }, { withCredentials: true });
       setNewFilePath('');
       setNewFileContent('');
       // Refresh files
-      const fileRes = await axios.get(`http://localhost:5001/file-api/repos/${repoId}/files`, {
+      const fileRes = await api.get(`/file-api/repos/${repoId}/files`, {
         withCredentials: true
       });
       setFiles(fileRes.data.payload || fileRes.data);
@@ -101,7 +100,7 @@ function RepoExplorer() {
     e.preventDefault();
     setCreating(true);
     try {
-      const response = await axios.post(`http://localhost:5001/issue-api/repos/${repoId}/issues`, {
+      const response = await api.post(`/issue-api/repos/${repoId}/issues`, {
         title: issueForm.title,
         description: issueForm.description
       }, { withCredentials: true });
@@ -110,7 +109,7 @@ function RepoExplorer() {
       setShowIssueForm(false);
       
       // Refresh issues
-      const issueRes = await axios.get(`http://localhost:5001/issue-api/repos/${repoId}/issues`, {
+      const issueRes = await api.get(`/issue-api/repos/${repoId}/issues`, {
         withCredentials: true
       });
       setIssues(issueRes.data.payload || issueRes.data);
@@ -126,7 +125,7 @@ function RepoExplorer() {
     e.preventDefault();
     setCreating(true);
     try {
-      await axios.post(`http://localhost:5001/pull-api/repos/${repoId}/pulls`, {
+      await api.post(`/pull-api/repos/${repoId}/pulls`, {
         title: prForm.title,
         description: prForm.description,
         fromBranch: prForm.fromBranch,
@@ -137,7 +136,7 @@ function RepoExplorer() {
       setShowPRForm(false);
       
       // Refresh pull requests
-      const pullRes = await axios.get(`http://localhost:5001/pull-api/repos/${repoId}/pulls`, {
+      const pullRes = await api.get(`/pull-api/repos/${repoId}/pulls`, {
         withCredentials: true
       });
       setPulls(pullRes.data.payload || pullRes.data);
@@ -153,14 +152,14 @@ function RepoExplorer() {
     e.preventDefault();
     setCreating(true);
     try {
-      await axios.post(
-        `http://localhost:5001/repo-api/repos/${repoId}/collaborators`,
+      await api.post(
+        `/repo-api/repos/${repoId}/collaborators`,
         { username: inviteUsername.trim(), role: inviteRole },
         { withCredentials: true }
       );
       setInviteUsername('');
       setInviteRole('viewer');
-      const res = await axios.get(`http://localhost:5001/repo-api/repos/${repoId}/collaborators`, { withCredentials: true });
+      const res = await api.get(`/repo-api/repos/${repoId}/collaborators`, { withCredentials: true });
       setCollaborators(res.data.payload || []);
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to add member');
@@ -172,8 +171,8 @@ function RepoExplorer() {
   const handleRemoveMember = async (userId) => {
     if (!window.confirm('Remove this person from the repository?')) return;
     try {
-      await axios.delete(`http://localhost:5001/repo-api/repos/${repoId}/collaborators/${userId}`, { withCredentials: true });
-      const res = await axios.get(`http://localhost:5001/repo-api/repos/${repoId}/collaborators`, { withCredentials: true });
+      await api.delete(`/repo-api/repos/${repoId}/collaborators/${userId}`, { withCredentials: true });
+      const res = await api.get(`/repo-api/repos/${repoId}/collaborators`, { withCredentials: true });
       setCollaborators(res.data.payload || []);
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to remove member');
@@ -182,12 +181,12 @@ function RepoExplorer() {
 
   const handleChangeMemberRole = async (userId, role) => {
     try {
-      await axios.patch(
-        `http://localhost:5001/repo-api/repos/${repoId}/collaborators/${userId}`,
+      await api.patch(
+        `/repo-api/repos/${repoId}/collaborators/${userId}`,
         { role },
         { withCredentials: true }
       );
-      const res = await axios.get(`http://localhost:5001/repo-api/repos/${repoId}/collaborators`, { withCredentials: true });
+      const res = await api.get(`/repo-api/repos/${repoId}/collaborators`, { withCredentials: true });
       setCollaborators(res.data.payload || []);
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to update role');
@@ -273,24 +272,34 @@ function RepoExplorer() {
       {/* Tab Content */}
       {activeTab === 'code' && (
         <>
-          <div className="border border-gray-300 rounded-md overflow-hidden bg-white">
-            <table className="w-full text-sm">
-              <tbody>
-                {files.map((file, index) => (
-                  <tr key={index} className="border-b last:border-0 hover:bg-gray-50">
-                    <td className="px-4 py-2 w-8">
-                      <FileText size={18} className="text-gray-500" />
-                    </td>
-                    <td className="py-2">
-                      <Link to={`/repo/${repoId}/blob/${file.path}`} className="text-[#0969da] hover:underline font-medium">
-                        {file.path}
-                      </Link>
-                    </td>
-                    <td className="py-2 text-gray-500">Latest commit message</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="flex border border-[#d0d7de] rounded-md overflow-hidden bg-white min-h-[320px]">
+            <div className="w-56 sm:w-64 shrink-0 border-r border-[#d0d7de]">
+              <FileTree repoId={repoId} files={files} />
+            </div>
+            <div className="flex-1 overflow-x-auto">
+              <table className="w-full text-sm">
+                <tbody>
+                  {files.map((file) => (
+                    <tr key={file._id || file.path} className="border-b last:border-0 hover:bg-gray-50">
+                      <td className="px-4 py-2 w-8">
+                        <FileText size={18} className="text-gray-500" />
+                      </td>
+                      <td className="py-2">
+                        <Link
+                          to={`/repo/${repoId}/blob/${file.path}`}
+                          className="text-[#0969da] hover:underline font-medium font-mono"
+                        >
+                          {file.path}
+                        </Link>
+                      </td>
+                      <td className="py-2 text-gray-500 text-xs">
+                        {file.updatedAt ? new Date(file.updatedAt).toLocaleString() : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {canWrite && (

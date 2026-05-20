@@ -4,122 +4,132 @@ import GitHubStrategy from 'passport-github2';
 import LocalStrategy from 'passport-local';
 import { UserTypeModel } from '../models/userModel.js';
 import { authenticate } from './authService.js';
-import bcrypt from 'bcryptjs';
 
-// Configure Passport Local Strategy (Email/Password)
-passport.use(new LocalStrategy({
-  usernameField: 'email',
-  passwordField: 'password'
-}, async (email, password, done) => {
-  try {
-    const user = await authenticate({ email, password });
-    return done(null, user);
-  } catch (error) {
-    return done(null, false, { message: error.message });
-  }
-}));
+const API_BASE = process.env.API_BASE_URL || 'http://localhost:5001';
 
-// Configure Passport Google Strategy
-passport.use(new GoogleStrategy({
-  clientID: process.env.GOOGLE_CLIENT_ID,
-  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-  callbackURL: '/api/auth/oauth/google/callback'
-}, async (accessToken, refreshToken, profile, done) => {
-  try {
-    // Check if user exists
-    let user = await User.findOne({ email: profile.emails[0].value });
-
-    if (user) {
-      // User exists, update OAuth provider info
-      if (!user.oauthProviders.some(p => p.provider === 'google')) {
-        user.oauthProviders.push({
-          provider: 'google',
-          providerId: profile.id,
-          accessToken,
-          refreshToken
-        });
-        await user.save();
+passport.use(
+  new LocalStrategy(
+    { usernameField: 'email', passwordField: 'password' },
+    async (email, password, done) => {
+      try {
+        const result = await authenticate({ email, password });
+        return done(null, result.user);
+      } catch (error) {
+        return done(null, false, { message: error.message });
       }
-    } else {
-      // Create new user
-      user = new User({
-        username: profile.displayName.toLowerCase().replace(/\s+/g, '-'),
-        email: profile.emails[0].value,
-        name: profile.displayName,
-        avatar: profile.photos[0]?.value,
-        oauthProviders: [{
-          provider: 'google',
-          providerId: profile.id,
-          accessToken,
-          refreshToken
-        }],
-        isActive: true,
-        role: 'USER'
+    }
+  )
+);
+
+async function findOrCreateOAuthUser({ provider, profileId, email, username, name, avatar, accessToken, refreshToken }) {
+  let user = email ? await UserTypeModel.findOne({ email }) : null;
+  if (!user) {
+    user = await UserTypeModel.findOne({
+      'oauthProviders.provider': provider,
+      'oauthProviders.providerId': profileId,
+    });
+  }
+
+  if (user) {
+    const hasProvider = user.oauthProviders?.some((p) => p.provider === provider);
+    if (!hasProvider) {
+      user.oauthProviders = user.oauthProviders || [];
+      user.oauthProviders.push({
+        provider,
+        providerId: profileId,
+        accessToken,
+        refreshToken,
       });
       await user.save();
     }
-
-    return done(null, user);
-  } catch (error) {
-    return done(error);
+    return user;
   }
-}));
 
-// Configure Passport GitHub Strategy
-passport.use(new GitHubStrategy({
-  clientID: process.env.GITHUB_CLIENT_ID,
-  clientSecret: process.env.GITHUB_CLIENT_SECRET,
-  callbackURL: '/api/auth/oauth/github/callback'
-}, async (accessToken, refreshToken, profile, done) => {
-  try {
-    // Check if user exists
-    let user = await User.findOne({ email: profile.emails?.[0]?.value });
+  const baseUsername = (username || email?.split('@')[0] || 'user')
+    .toLowerCase()
+    .replace(/[^a-z0-9-_]/g, '-')
+    .slice(0, 30);
+  let uniqueUsername = baseUsername;
+  let n = 0;
+  while (await UserTypeModel.findOne({ username: uniqueUsername })) {
+    n += 1;
+    uniqueUsername = `${baseUsername}${n}`;
+  }
 
-    if (user) {
-      // User exists, update OAuth provider info
-      if (!user.oauthProviders.some(p => p.provider === 'github')) {
-        user.oauthProviders.push({
-          provider: 'github',
-          providerId: profile.id,
+  user = new UserTypeModel({
+    username: uniqueUsername,
+    email: email || `${uniqueUsername}@${provider}.local`,
+    name: name || uniqueUsername,
+    avatar,
+    oauthProviders: [{ provider, providerId: profileId, accessToken, refreshToken }],
+    isActive: true,
+    role: 'user',
+  });
+  await user.save();
+  return user;
+}
+
+passport.use(
+  new GoogleStrategy(
+    {
+      clientID: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      callbackURL: `${API_BASE}/auth/google/callback`,
+    },
+    async (accessToken, refreshToken, profile, done) => {
+      try {
+        const user = await findOrCreateOAuthUser({
+          provider: 'google',
+          profileId: profile.id,
+          email: profile.emails?.[0]?.value,
+          username: profile.displayName,
+          name: profile.displayName,
+          avatar: profile.photos?.[0]?.value,
           accessToken,
-          refreshToken
+          refreshToken,
         });
-        await user.save();
+        return done(null, user);
+      } catch (error) {
+        return done(error);
       }
-    } else {
-      // Create new user
-      user = new User({
-        username: profile.username,
-        email: profile.emails?.[0]?.value || `${profile.username}@github.com`,
-        name: profile.displayName || profile.username,
-        avatar: profile.photos[0]?.value,
-        oauthProviders: [{
-          provider: 'github',
-          providerId: profile.id,
-          accessToken,
-          refreshToken
-        }],
-        isActive: true,
-        role: 'USER'
-      });
-      await user.save();
     }
+  )
+);
 
-    return done(null, user);
-  } catch (error) {
-    return done(error);
-  }
-}));
+passport.use(
+  new GitHubStrategy(
+    {
+      clientID: process.env.GITHUB_CLIENT_ID,
+      clientSecret: process.env.GITHUB_CLIENT_SECRET,
+      callbackURL: `${API_BASE}/auth/github/callback`,
+    },
+    async (accessToken, refreshToken, profile, done) => {
+      try {
+        const user = await findOrCreateOAuthUser({
+          provider: 'github',
+          profileId: profile.id,
+          email: profile.emails?.[0]?.value,
+          username: profile.username,
+          name: profile.displayName || profile.username,
+          avatar: profile.photos?.[0]?.value,
+          accessToken,
+          refreshToken,
+        });
+        return done(null, user);
+      } catch (error) {
+        return done(error);
+      }
+    }
+  )
+);
 
-// Serialize user for session
 passport.serializeUser((user, done) => {
   done(null, user._id);
 });
 
-// Deserialize user from session
 passport.deserializeUser(async (id, done) => {
   try {
-    const user = await User.findById(id);
+    const user = await UserTypeModel.findById(id);
     done(null, user);
   } catch (error) {
     done(error);

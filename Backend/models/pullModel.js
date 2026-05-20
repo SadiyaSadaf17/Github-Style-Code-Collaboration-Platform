@@ -37,7 +37,15 @@ const pullSchema = new Schema(
       type: String,
       enum: ["OPEN", "MERGED", "CLOSED"],
       default: "OPEN"
-    }
+    },
+
+    /** Snapshot of file contents on the base branch when the PR was opened (for diffs). */
+    fileSnapshots: [
+      {
+        filename: { type: String, required: true },
+        baseContent: { type: String, default: "" },
+      },
+    ],
   },
   {
     timestamps: true,

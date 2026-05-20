@@ -143,7 +143,8 @@ io.on('connection', (socket) => {
   socket.on('file:edit:update', (data) => {
     socket.to(`repo:${data.repoId}`).emit('file:edit:update', {
       ...data,
-      userId: socket.id
+      userId: socket.id,
+      socketId: socket.id,
     });
   });
 

@@ -1,1 +1,6 @@
-@import 'tailwindcss'
+@import 'tailwindcss';
+
+.collab-cursor-line {
+  border-left: 2px solid #cf222e;
+  margin-left: 2px;
+}

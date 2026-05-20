@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import axios from 'axios';
 import { User, Calendar, MessageSquare } from 'lucide-react';
 import { useSocket } from '../contexts/SocketContext';
+import PRDiffViewer from './PRDiffViewer';
 
 function PullRequestDetail() {
   const { repoId, prId } = useParams();
@@ -49,11 +50,17 @@ function PullRequestDetail() {
   useEffect(() => {
     if (!repoId) return;
     joinRepo(repoId);
-    const unsub = subscribe('review:comment', (data) => {
+    const unsubReview = subscribe('review:comment', (data) => {
       if (data?.pullRequestId === prId) loadComments();
     });
+    const unsubPr = subscribe('pr:updated', (data) => {
+      if (data?.pullRequestId !== prId && data?.pullRequest?._id !== prId) return;
+      const updated = data?.pullRequest;
+      if (updated) setPr((prev) => ({ ...prev, ...updated }));
+    });
     return () => {
-      unsub();
+      unsubReview();
+      unsubPr();
       leaveRepo(repoId);
     };
   }, [repoId, prId, joinRepo, leaveRepo, subscribe, loadComments]);
@@ -100,7 +107,7 @@ function PullRequestDetail() {
   if (!pr) return <div className="p-10 text-center">Pull request not found</div>;
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
+    <div className="max-w-6xl mx-auto px-4 py-8">
       <div className="flex items-center gap-2 text-sm mb-6 text-gray-600">
         <Link to={`/repo/${repoId}`} className="text-[#0969da] hover:underline">
           {repoInfo?.name}
@@ -158,6 +165,13 @@ function PullRequestDetail() {
       <div className="bg-white border border-gray-300 rounded-md p-6 mb-8">
         <p className="text-gray-800 whitespace-pre-wrap">{pr.description}</p>
       </div>
+
+      <PRDiffViewer
+        repoId={repoId}
+        prId={prId}
+        fromBranch={pr.fromBranch}
+        toBranch={pr.toBranch}
+      />
 
       <div className="mb-8">
         <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">

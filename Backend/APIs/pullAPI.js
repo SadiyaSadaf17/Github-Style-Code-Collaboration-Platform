@@ -6,6 +6,7 @@ import { optionalVerifyToken } from "../middlewares/optionalVerifyToken.js"
 import { loadRepo, requireRepoRead, requireRepoWrite } from "../middlewares/repoAccessMiddleware.js"
 import notificationService from "../services/notificationService.js"
 import { emitToRepo } from "../utils/socketRepoEmit.js"
+import { snapshotRepoFilesForPull, buildPullRequestDiff } from "../services/prDiffService.js"
 
 export const pullRoute=exp.Router();
 
@@ -15,13 +16,16 @@ pullRoute.post("/repos/:repoId/pulls", verifyToken("user"), loadRepo("repoId"), 
     const repoId = req.params.repoId;
     const { title, description, fromBranch, toBranch } = req.body;
 
+    const fileSnapshots = await snapshotRepoFilesForPull(repoId);
+
     const newPR = new PullModel({
       repoId,
       authorId: req.user.userId,
       title,
       description,
       fromBranch,
-      toBranch
+      toBranch,
+      fileSnapshots,
     });
 
     await newPR.save();
@@ -80,6 +84,23 @@ pullRoute.get("/repos/:repoId/pulls", optionalVerifyToken(), loadRepo("repoId"),
 });
 
 
+// Pull request file diff (GitHub-style structured diff)
+pullRoute.get("/repos/:repoId/pulls/:prId/diff", optionalVerifyToken(), loadRepo("repoId"), requireRepoRead, async (req, res) => {
+  try {
+    const { prId, repoId } = req.params;
+    const diff = await buildPullRequestDiff(prId, repoId);
+    if (!diff) {
+      return res.status(404).json({ message: "pull request not found" });
+    }
+    res.status(200).json({
+      message: "pull request diff fetched",
+      payload: diff,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 //get single pull request
 pullRoute.get("/repos/:repoId/pulls/:prId", optionalVerifyToken(), loadRepo("repoId"), requireRepoRead, async (req, res) => {
 
@@ -118,6 +139,7 @@ pullRoute.patch("/repos/:repoId/pulls/:prId", verifyToken("user"), loadRepo("rep
   );
 
   emitToRepo(repoId, "pr:updated", { repositoryId: repoId, pullRequestId: prId, pullRequest: updatedPR?.toObject?.() });
+  emitToRepo(repoId, "pr:diff-updated", { repositoryId: repoId, pullRequestId: prId });
 
   res.status(200).json({
     message: "pull request updated",

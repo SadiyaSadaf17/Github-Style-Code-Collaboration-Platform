@@ -1,18 +1,14 @@
 import React from 'react';
-import { createBrowserRouter, RouterProvider } from 'react-router-dom';
-
-// Socket Context
-import { SocketProvider } from './contexts/SocketContext';
-
-// Layout
+import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
 import RootLayout from './components/RootLayout';
-
-// Pages
+import ProtectedRoute from './components/ProtectedRoute';
+import AuthBootstrap from './components/AuthBootstrap';
 import Dashboard from './components/Dashboard';
 import Login from './components/Login';
 import ForgotPassword from './components/ForgotPassword';
 import ResetPassword from './components/ResetPassword';
 import Signup from './components/Signup';
+import OAuthCallback from './components/OAuthCallback';
 import CreateRepo from './components/CreateRepo';
 import Profile from './components/Profile';
 import RepoExplorer from './components/RepoExplorer';
@@ -26,7 +22,6 @@ import PullRequests from './components/PullRequests';
 import Marketplace from './components/Marketplace';
 import Settings from './components/Settings';
 
-// Error Page (Optional but recommended)
 const ErrorPage = () => (
   <div className="flex flex-col items-center justify-center min-h-screen">
     <h1 className="text-4xl font-bold">404</h1>
@@ -37,87 +32,109 @@ const ErrorPage = () => (
 function App() {
   const router = createBrowserRouter([
     {
-      path: "/",
-      element: <RootLayout />,
+      path: '/',
+      element: (
+        <>
+          <AuthBootstrap />
+          <RootLayout />
+        </>
+      ),
       errorElement: <ErrorPage />,
       children: [
+        { path: 'login', element: <Login /> },
+        { path: 'signup', element: <Signup /> },
+        { path: 'oauth/callback', element: <OAuthCallback /> },
+        { path: 'forgot-password', element: <ForgotPassword /> },
+        { path: 'reset-password', element: <ResetPassword /> },
+        { path: 'explore', element: <Home /> },
         {
-          index: true, // Default page at "/"
-          element: <Dashboard />
+          index: true,
+          element: (
+            <ProtectedRoute>
+              <Dashboard />
+            </ProtectedRoute>
+          ),
         },
         {
-          path: "login",
-          element: <Login />
+          path: 'new',
+          element: (
+            <ProtectedRoute>
+              <CreateRepo />
+            </ProtectedRoute>
+          ),
         },
         {
-          path: "forgot-password",
-          element: <ForgotPassword />
+          path: 'settings',
+          element: (
+            <ProtectedRoute>
+              <Settings />
+            </ProtectedRoute>
+          ),
         },
         {
-          path: "reset-password",
-          element: <ResetPassword />
+          path: 'notifications',
+          element: (
+            <ProtectedRoute>
+              <Notification />
+            </ProtectedRoute>
+          ),
         },
         {
-          path: "signup",
-          element: <Signup />
+          path: 'issues',
+          element: (
+            <ProtectedRoute>
+              <Issues />
+            </ProtectedRoute>
+          ),
         },
         {
-          path: "new", // Create repository
-          element: <CreateRepo />
+          path: 'pulls',
+          element: (
+            <ProtectedRoute>
+              <PullRequests />
+            </ProtectedRoute>
+          ),
+        },
+        { path: 'profile/:username', element: <Profile /> },
+        {
+          path: 'repo/:repoId',
+          element: (
+            <ProtectedRoute>
+              <RepoExplorer />
+            </ProtectedRoute>
+          ),
         },
         {
-          path: "profile/:username", // Dynamic profile route
-          element: <Profile />
+          path: 'repo/:repoId/blob/*',
+          element: (
+            <ProtectedRoute>
+              <FileViewer />
+            </ProtectedRoute>
+          ),
         },
         {
-          path: "repo/:repoId", // Repository explorer route
-          element: <RepoExplorer />
+          path: 'repo/:repoId/issues/:issueId',
+          element: (
+            <ProtectedRoute>
+              <IssueDetail />
+            </ProtectedRoute>
+          ),
         },
         {
-          path: "repo/:repoId/blob/*", // File viewer route
-          element: <FileViewer />
+          path: 'repo/:repoId/pull/:prId',
+          element: (
+            <ProtectedRoute>
+              <PullRequestDetail />
+            </ProtectedRoute>
+          ),
         },
-        {
-          path: "repo/:repoId/issues/:issueId", // Issue detail route
-          element: <IssueDetail />
-        },
-        {
-          path: "repo/:repoId/pull/:prId", // Pull request detail route
-          element: <PullRequestDetail />
-        },
-        {
-          path: "notifications", // Notifications route
-          element: <Notification />
-        },
-        {
-          path: "issues", // Issues list route
-          element: <Issues />
-        },
-        {
-          path: "pulls", // Pull requests list route
-          element: <PullRequests />
-        },
-        {
-          path: "marketplace", // Marketplace route
-          element: <Marketplace />
-        },
-        {
-          path: "explore", // Explore repositories route
-          element: <Home />
-        },
-        {
-          path: "settings", // Settings route
-          element: <Settings />
-        }
-      ]
-    }
+        { path: 'marketplace', element: <Marketplace /> },
+      ],
+    },
+    { path: '*', element: <Navigate to="/" replace /> },
   ]);
 
-  return (
-    <SocketProvider>
-      <RouterProvider router={router} />
-    </SocketProvider>
-  );
+  return <RouterProvider router={router} />;
 }
 
 export default App;

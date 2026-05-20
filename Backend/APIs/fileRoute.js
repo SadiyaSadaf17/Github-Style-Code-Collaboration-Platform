@@ -1,8 +1,20 @@
 import exp from "express";
 import { FileModel } from "../models/fileModel.js";
+import { PullModel } from "../models/pullModel.js";
 import { verifyToken } from "../middlewares/verifyToken.js";
 import { optionalVerifyToken } from "../middlewares/optionalVerifyToken.js";
 import { loadRepo, requireRepoRead, requireRepoWrite } from "../middlewares/repoAccessMiddleware.js";
+import { emitToRepo } from "../utils/socketRepoEmit.js";
+
+async function notifyOpenPullDiffs(repoId) {
+  const openPrs = await PullModel.find({ repoId, status: "OPEN" }).select("_id");
+  for (const pr of openPrs) {
+    emitToRepo(repoId, "pr:diff-updated", {
+      repositoryId: repoId.toString(),
+      pullRequestId: pr._id.toString(),
+    });
+  }
+}
 
 export const fileRoute = exp.Router();
 
@@ -28,6 +40,7 @@ fileRoute.post("/repos/:repoId/files", verifyToken("user"), loadRepo("repoId"), 
     });
 
     await newFile.save();
+    await notifyOpenPullDiffs(repoId);
 
     res.status(201).json({
       message: "file created",
@@ -123,6 +136,7 @@ fileRoute.patch("/repos/:repoId/file", verifyToken("user"), loadRepo("repoId"), 
     });
 
     await newCommit.save();
+    await notifyOpenPullDiffs(repoId);
 
     res.status(200).json({
       message: "file updated and committed",
@@ -147,6 +161,8 @@ fileRoute.delete("/repos/:repoId/file", verifyToken("user"), loadRepo("repoId"),
         message: "file not found"
       });
     }
+
+    await notifyOpenPullDiffs(repoId);
 
     res.status(200).json({
       message: "file deleted",

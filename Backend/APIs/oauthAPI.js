@@ -35,14 +35,15 @@ oauthRouter.get('/google/callback',
       const { accessToken, refreshToken } = generateToken(req.user);
       
       // Redirect to frontend with tokens
-      const redirectUrl = new URL(process.env.FRONTEND_URL || 'http://localhost:5173');
+      const base = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
+      const redirectUrl = new URL(`${base}/oauth/callback`);
       redirectUrl.searchParams.append('access_token', accessToken);
       redirectUrl.searchParams.append('refresh_token', refreshToken);
       redirectUrl.searchParams.append('user_id', req.user._id);
       
       res.redirect(redirectUrl.toString());
     } catch (error) {
-      res.redirect(`${process.env.FRONTEND_URL}/login?error=${error.message}`);
+      res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent(error.message)}`);
     }
   }
 );
@@ -60,14 +61,15 @@ oauthRouter.get('/github/callback',
       const { accessToken, refreshToken } = generateToken(req.user);
       
       // Redirect to frontend with tokens
-      const redirectUrl = new URL(process.env.FRONTEND_URL || 'http://localhost:5173');
+      const base = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
+      const redirectUrl = new URL(`${base}/oauth/callback`);
       redirectUrl.searchParams.append('access_token', accessToken);
       redirectUrl.searchParams.append('refresh_token', refreshToken);
       redirectUrl.searchParams.append('user_id', req.user._id);
       
       res.redirect(redirectUrl.toString());
     } catch (error) {
-      res.redirect(`${process.env.FRONTEND_URL}/login?error=${error.message}`);
+      res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent(error.message)}`);
     }
   }
 );

@@ -63,6 +63,21 @@ userRoute.post("/logout", (req, res) => {
   res.status(200).json({ message: "Logout successful" });
 });
 
+/** Current authenticated user (cookie or Bearer). */
+userRoute.get("/users/me", verifyToken("user"), async (req, res) => {
+  try {
+    const user = await UserTypeModel.findById(req.user.userId).select(
+      "-password -refreshTokens"
+    );
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    res.status(200).json({ message: "profile fetched", payload: user });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 /** Request password reset link (email). OAuth-only accounts are skipped silently. */
 userRoute.post("/users/forgot-password", async (req, res) => {
   try {

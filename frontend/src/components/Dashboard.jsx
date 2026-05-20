@@ -1,122 +1,126 @@
-import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Book, Plus, GitPullRequest, CircleDot, Star, History } from 'lucide-react';
+import { Plus } from 'lucide-react';
+import api from '../services/api';
+import { useAuth } from '../store/authStore';
 import { getUserAvatarUrl } from '../utils/userAvatar.js';
+import RepoCard from './repo/RepoCard';
+import CreateRepoModal from './repo/CreateRepoModal';
 
 function Dashboard() {
+  const { currentUser } = useAuth();
   const [myRepos, setMyRepos] = useState([]);
-  const [activity, setActivity] = useState([]);
   const [loading, setLoading] = useState(true);
-  
-  const user = JSON.parse(localStorage.getItem('user'));
+  const [searchQuery, setSearchQuery] = useState('');
+  const [visibilityFilter, setVisibilityFilter] = useState('all');
+  const [showCreateModal, setShowCreateModal] = useState(false);
+
+  const fetchRepos = async () => {
+    try {
+      const res = await api.get('/repo-api/repos');
+      setMyRepos(res.data.payload || []);
+    } catch (err) {
+      console.error('Dashboard fetch error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchDashboardData = async () => {
-      try {
-        // Fetch repositories owned by the logged-in user
-        const reposRes = await axios.get('http://localhost:5001/repo-api/repos', {
-          withCredentials: true
-        });
-        
-        // Fetch activity feed (commits/actions from followed users)
-        // const activityRes = await axios.get('http://localhost:5000/repository-api/repositories  ', {
-        //   withCredentials: true
-        // });
-
-        setMyRepos(reposRes.data.payload || []);
-        // setMyRepos(reposRes.data);
-        // setActivity(activityRes.data.payload || []);
-      } catch (err) {
-        console.error("Dashboard fetch error:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchDashboardData();
+    fetchRepos();
   }, []);
 
-  if (loading) return <div className="p-10 text-center text-gray-500">Loading your dashboard...</div>;
+  const filteredRepos = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return myRepos.filter((repo) => {
+      const matchesSearch =
+        !q ||
+        repo.name?.toLowerCase().includes(q) ||
+        repo.description?.toLowerCase().includes(q) ||
+        repo.owner?.username?.toLowerCase().includes(q);
+      const matchesVisibility =
+        visibilityFilter === 'all' ||
+        (visibilityFilter === 'public' && !repo.isPrivate) ||
+        (visibilityFilter === 'private' && repo.isPrivate);
+      return matchesSearch && matchesVisibility;
+    });
+  }, [myRepos, searchQuery, visibilityFilter]);
+
+  if (loading) {
+    return <div className="p-10 text-center text-gray-500">Loading your dashboard…</div>;
+  }
 
   return (
-    <div className="max-w-[1400px] mx-auto flex flex-col lg:flex-row gap-8 px-4 py-8">
-      
-      {/* Left Sidebar: Navigation & Personal Repos */}
-      <aside className="lg:w-1/4 space-y-8">
+    <div className="max-w-[1400px] mx-auto px-4 py-8">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
         <div>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-[#1f2328]">Top Repositories</h2>
-            <Link to="/new" className="bg-[#2da44e] text-white px-2 py-1 rounded-md text-xs font-semibold hover:bg-[#2c974b] flex items-center gap-1">
-              <Plus size={14} /> New
-            </Link>
-          </div>
-          <input 
-            type="text" 
-            placeholder="Find a repository..." 
-            className="w-full bg-[#f6f8fa] border border-[#d0d7de] rounded-md px-3 py-1 text-sm mb-4 outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
-          />
-          <ul className="space-y-2">
-            {Array.isArray(myRepos) && myRepos.map(repo => ( 
-              <li key={repo._id} className="flex items-center gap-2 text-sm truncate">
-                <img src={getUserAvatarUrl(user)} className="w-4 h-4 rounded-full object-cover" alt="avatar" />
-                <Link to={`/repo/${repo._id}`} className="font-semibold text-[#1f2328] hover:underline truncate flex-1 min-w-0">
-                  <span className="font-normal">{repo.owner?.username || repo.owner?.name || user?.username || user?.name}</span>
-                  <span className="text-gray-500"> / </span>
-                  <span className="font-normal">{repo.name}</span>
-                  {repo.myAccessRole && repo.myAccessRole !== 'owner' && (
-                    <span className="ml-1 text-xs font-normal text-gray-500 capitalize">({repo.myAccessRole})</span>
-                  )}
-                </Link>
-              </li>
-            ))}
-          </ul>
+          <h1 className="text-2xl font-semibold text-[#1f2328]">Your repositories</h1>
+          <p className="text-sm text-gray-600 mt-1">
+            {filteredRepos.length} of {myRepos.length} repositories
+          </p>
         </div>
+        <button
+          type="button"
+          onClick={() => setShowCreateModal(true)}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-[#2da44e] text-white text-sm font-semibold rounded-md hover:bg-[#2c974b]"
+        >
+          <Plus size={16} />
+          New repository
+        </button>
+      </div>
 
-        <div className="border-t border-gray-200 pt-6">
-          <h2 className="text-sm font-semibold mb-4 text-[#1f2328]">Recent Activity</h2>
-          <div className="space-y-4 text-xs text-gray-500 italic">
-            <p>No recent activity found in your network.</p>
+      <div className="flex flex-col sm:flex-row gap-3 mb-6">
+        <input
+          type="search"
+          placeholder="Search repositories…"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="flex-1 bg-white border border-[#d0d7de] rounded-md px-3 py-2 text-sm outline-none focus:border-[#0969da] focus:ring-1 focus:ring-[#0969da]"
+        />
+        <select
+          value={visibilityFilter}
+          onChange={(e) => setVisibilityFilter(e.target.value)}
+          className="border border-[#d0d7de] rounded-md px-3 py-2 text-sm bg-white"
+        >
+          <option value="all">All</option>
+          <option value="public">Public</option>
+          <option value="private">Private</option>
+        </select>
+      </div>
+
+      {filteredRepos.length === 0 ? (
+        <div className="border border-dashed border-gray-300 rounded-lg p-12 text-center bg-[#f6f8fa]">
+          <h2 className="text-lg font-medium text-gray-700">No repositories match</h2>
+          <p className="text-sm text-gray-500 mt-2">Create one or adjust your filters.</p>
+          <Link to="/explore" className="inline-block mt-4 text-[#0969da] text-sm hover:underline">
+            Explore public repositories
+          </Link>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {filteredRepos.map((repo) => (
+            <RepoCard key={repo._id} repo={repo} />
+          ))}
+        </div>
+      )}
+
+      <aside className="mt-10 pt-8 border-t border-gray-200">
+        <div className="flex items-center gap-3">
+          <img src={getUserAvatarUrl(currentUser)} alt="" className="w-10 h-10 rounded-full object-cover" />
+          <div>
+            <p className="font-semibold text-[#1f2328]">{currentUser?.name || currentUser?.username}</p>
+            <p className="text-sm text-gray-500">@{currentUser?.username}</p>
           </div>
         </div>
       </aside>
 
-      {/* Main Content: Personal Feed */}
-      <main className="lg:w-3/4">
-        <div className="mb-6">
-          <h1 className="text-xl font-semibold text-[#1f2328]">All activity</h1>
-        </div>
-
-        <div className="space-y-4">
-          {activity.length > 0 ? (
-            activity.map((item, idx) => (
-              <div key={idx} className="p-4 bg-white border border-[#d0d7de] rounded-md shadow-sm">
-                {/* Activity Feed Item Template */}
-                <div className="flex items-start gap-3">
-                  <History size={18} className="text-gray-400 mt-1" />
-                  <div>
-                    <p className="text-sm text-gray-600">
-                      <span className="font-semibold text-black">{item.user}</span> pushed to 
-                      <span className="font-semibold text-black ml-1">{item.repo}</span>
-                    </p>
-                    <p className="text-xs text-gray-400 mt-1">{item.timestamp}</p>
-                  </div>
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="border border-dashed border-gray-300 rounded-lg p-12 text-center">
-              <h2 className="text-lg font-medium text-gray-600">Welcome to your dashboard!</h2>
-              <p className="text-sm text-gray-500 mt-2">
-                Follow other developers from the AU 2027 batch to see their latest commits here.
-              </p>
-              <Link to="/explore" className="inline-block mt-4 text-[#0969da] text-sm hover:underline">
-                Explore repositories
-              </Link>
-            </div>
-          )}
-        </div>
-      </main>
+      <CreateRepoModal
+        open={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onCreated={(repo) => {
+          setMyRepos((prev) => [repo, ...prev]);
+        }}
+      />
     </div>
   );
 }
