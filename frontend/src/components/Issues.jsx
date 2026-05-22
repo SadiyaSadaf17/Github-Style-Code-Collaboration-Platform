@@ -1,28 +1,33 @@
-import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import React, { useEffect, useMemo, useState } from 'react';
+import api from '../services/api.js';
 import { Link } from 'react-router-dom';
 import { CircleDot, Plus } from 'lucide-react';
+import { repoTabCreateUrl } from '../utils/repoLinks.js';
 
 function Issues() {
   const [issues, setIssues] = useState([]);
+  const [repos, setRepos] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  const newIssueUrl = useMemo(
+    () => repoTabCreateUrl(repos[0]?._id, 'issues'),
+    [repos]
+  );
 
   useEffect(() => {
     const fetchIssues = async () => {
       try {
-        // For now, we'll fetch issues from all repositories the user has access to
-        // This is a simplified implementation - in a real app you'd want to aggregate issues
-        const reposRes = await axios.get('http://localhost:5001/repo-api/repos', {
-          withCredentials: true
-        });
+        const reposRes = await api.get('/repo-api/repos');
+        const repoList = reposRes.data.payload || [];
+        setRepos(repoList);
 
         const allIssues = [];
-        for (const repo of reposRes.data.payload || []) {
+        for (const repo of repoList) {
           try {
-            const issuesRes = await axios.get(`http://localhost:5001/issue-api/repos/${repo._id}/issues`);
-            const repoIssues = (issuesRes.data.payload || []).map(issue => ({
+            const issuesRes = await api.get(`/issue-api/repos/${repo._id}/issues`);
+            const repoIssues = (issuesRes.data.payload || []).map((issue) => ({
               ...issue,
-              repository: repo
+              repository: repo,
             }));
             allIssues.push(...repoIssues);
           } catch (err) {
@@ -32,13 +37,19 @@ function Issues() {
 
         setIssues(allIssues);
       } catch (err) {
-        console.error("Error fetching issues:", err);
+        console.error('Error fetching issues:', err);
       } finally {
         setLoading(false);
       }
     };
 
     fetchIssues();
+    const onAuthChange = () => {
+      setLoading(true);
+      fetchIssues();
+    };
+    window.addEventListener('app-auth-changed', onAuthChange);
+    return () => window.removeEventListener('app-auth-changed', onAuthChange);
   }, []);
 
   if (loading) return <div className="p-10 text-center">Loading issues...</div>;
@@ -47,13 +58,23 @@ function Issues() {
     <div className="max-w-6xl mx-auto px-4 py-8">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold">Issues</h1>
-        <Link
-          to="/new"
-          className="bg-[#2da44e] text-white px-4 py-2 rounded-md hover:bg-[#2c974b] flex items-center gap-2"
-        >
-          <Plus size={16} />
-          New issue
-        </Link>
+        {repos.length > 0 ? (
+          <Link
+            to={newIssueUrl}
+            className="bg-[#2da44e] text-white px-4 py-2 rounded-md hover:bg-[#2c974b] flex items-center gap-2"
+          >
+            <Plus size={16} />
+            New issue
+          </Link>
+        ) : (
+          <Link
+            to="/"
+            className="bg-[#2da44e] text-white px-4 py-2 rounded-md hover:bg-[#2c974b] flex items-center gap-2"
+          >
+            <Plus size={16} />
+            Create a repository first
+          </Link>
+        )}
       </div>
 
       <div className="space-y-4">
@@ -84,13 +105,22 @@ function Issues() {
             <CircleDot size={48} className="text-gray-300 mx-auto mb-4" />
             <h2 className="text-xl font-semibold text-gray-600 mb-2">No issues found</h2>
             <p className="text-gray-500 mb-4">There are no issues in your repositories yet.</p>
-            <Link
-              to="/new"
-              className="bg-[#2da44e] text-white px-4 py-2 rounded-md hover:bg-[#2c974b] inline-flex items-center gap-2"
-            >
-              <Plus size={16} />
-              Create your first issue
-            </Link>
+            {repos.length > 0 ? (
+              <Link
+                to={newIssueUrl}
+                className="bg-[#2da44e] text-white px-4 py-2 rounded-md hover:bg-[#2c974b] inline-flex items-center gap-2"
+              >
+                <Plus size={16} />
+                Create your first issue
+              </Link>
+            ) : (
+              <Link
+                to="/"
+                className="text-[#0969da] hover:underline text-sm"
+              >
+                Go to dashboard to create a repository
+              </Link>
+            )}
           </div>
         )}
       </div>

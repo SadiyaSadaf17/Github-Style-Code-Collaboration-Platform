@@ -12,8 +12,12 @@ export const verifyToken = (...allowedRoles) => {
 
     try {
 
-      // Read token from cookie or Authorization header
-      const token = req.cookies.token || (req.headers.authorization && req.headers.authorization.startsWith('Bearer ') ? req.headers.authorization.substring(7) : null);
+      // Prefer Bearer (refreshed sessionStorage token) over stale httpOnly cookie
+      const bearer =
+        req.headers.authorization && req.headers.authorization.startsWith("Bearer ")
+          ? req.headers.authorization.substring(7)
+          : null;
+      const token = bearer || req.cookies?.token || null;
 
       if (!token) {
 
@@ -63,7 +67,7 @@ export const verifyToken = (...allowedRoles) => {
 
       }
 
-     // next(err);
+      return res.status(401).json({ message: "Unauthorized. Please login again" });
 
     }
 

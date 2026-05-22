@@ -2,6 +2,7 @@ import exp from "express";
 import bcrypt from "bcryptjs";
 import { authenticate } from "../services/authService.js";
 import { UserTypeModel } from "../models/userModel.js";
+import { verifyToken } from "../middlewares/verifyToken.js";
 export const commonRouter = exp.Router();
 
 //login
@@ -32,10 +33,10 @@ commonRouter.get("/logout", (req, res) => {
   res.status(200).json({ message: "Logged out successfully" });
 });
 
-//Change password(Protected route)
-commonRouter.put("/change-password", async (req, res) => {
-  //get current password and new password
-  const { role, email, currentPassword, newPassword } = req.body;
+//Change password (authenticated)
+commonRouter.put("/change-password", verifyToken("user", "admin"), async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  const email = req.user.email;
   // Prevent same password
   if (currentPassword === newPassword) {
     return res.status(400).json({ message: "newPassword must be different from currentPassword" });

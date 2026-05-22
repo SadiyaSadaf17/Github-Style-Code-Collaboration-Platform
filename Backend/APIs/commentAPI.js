@@ -68,7 +68,7 @@ commentRoute.post("/comments", verifyToken("user"), async (req, res) => {
 commentRoute.get("/comments/:parentId", optionalVerifyToken(), async (req, res) => {
   try {
     const { parentId } = req.params;
-    const comments = await CommentModel.find({ parentId });
+    const comments = await CommentModel.find({ parentComment: parentId });
     res.status(200).json({
       message: "comments fetched",
       payload: comments,

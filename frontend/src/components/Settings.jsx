@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
+import api from '../services/api.js';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../store/authStore.js';
 import { Settings, Mail, Lock, Bell, Palette } from 'lucide-react';
@@ -50,8 +50,7 @@ function SettingsPage() {
     try {
       const fd = new FormData();
       fd.append('avatar', file);
-      const res = await axios.post('http://localhost:5001/user-api/users/me/avatar', fd, {
-        withCredentials: true,
+      const res = await api.post('/user-api/users/me/avatar', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       const user = res.data.payload;
@@ -72,11 +71,9 @@ function SettingsPage() {
     setAvatarLoading(true);
     setMessage('');
     try {
-      const res = await axios.patch(
-        'http://localhost:5001/user-api/users/me/avatar',
-        { avatarUrl: avatarUrlInput.trim() },
-        { withCredentials: true }
-      );
+      const res = await api.patch('/user-api/users/me/avatar', {
+        avatarUrl: avatarUrlInput.trim(),
+      });
       persistUser(res.data.payload);
       setMessage('Profile photo URL saved!');
       setTimeout(() => setMessage(''), 3000);
@@ -91,9 +88,7 @@ function SettingsPage() {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await axios.patch('http://localhost:5001/user-api/users/me', profileData, {
-        withCredentials: true,
-      });
+      const res = await api.patch('/user-api/users/me', profileData);
 
       persistUser(res.data.payload);
       setMessage('Profile updated successfully!');
@@ -355,14 +350,10 @@ function SettingsPage() {
                         setAccountLoading(true);
                         setAccountFeedback('');
                         try {
-                          const res = await axios.patch(
-                            'http://localhost:5001/user-api/users/me/email',
-                            {
-                              newEmail: emailForm.newEmail.trim(),
-                              currentPassword: emailForm.currentPassword,
-                            },
-                            { withCredentials: true }
-                          );
+                          const res = await api.patch('/user-api/users/me/email', {
+                            newEmail: emailForm.newEmail.trim(),
+                            currentPassword: emailForm.currentPassword,
+                          });
                           if (res.data.payload) {
                             persistUser(res.data.payload);
                           }
@@ -424,14 +415,10 @@ function SettingsPage() {
                           return;
                         }
                         try {
-                          await axios.patch(
-                            'http://localhost:5001/user-api/users/me/password',
-                            {
-                              currentPassword: pwdForm.current,
-                              newPassword: pwdForm.next,
-                            },
-                            { withCredentials: true }
-                          );
+                          await api.patch('/user-api/users/me/password', {
+                            currentPassword: pwdForm.current,
+                            newPassword: pwdForm.next,
+                          });
                           setAccountFeedback('Password changed successfully.');
                           setPwdForm({ current: '', next: '', confirm: '' });
                         } catch (err) {

@@ -6,7 +6,9 @@ import { optionalVerifyToken } from "../middlewares/optionalVerifyToken.js"
 import { loadRepo, requireRepoRead, requireRepoWrite } from "../middlewares/repoAccessMiddleware.js"
 import notificationService from "../services/notificationService.js"
 import { emitToRepo } from "../utils/socketRepoEmit.js"
-import { snapshotRepoFilesForPull, buildPullRequestDiff } from "../services/prDiffService.js"
+import { snapshotRepoFilesForPull, buildPullRequestDiff, applyPullRequestMerge } from "../services/prDiffService.js"
+import { recordActivity } from "../services/activityService.js"
+import { auditFromRequest } from "../services/auditService.js"
 
 export const pullRoute=exp.Router();
 
@@ -55,6 +57,13 @@ pullRoute.post("/repos/:repoId/pulls", verifyToken("user"), loadRepo("repoId"), 
     emitToRepo(repoId, "pr:opened", {
       repositoryId: repoId,
       pullRequest: newPR.toObject(),
+    });
+
+    await recordActivity({
+      actor: req.user.userId,
+      type: "pr_opened",
+      repository: repoId,
+      payload: { pullRequestId: newPR._id, title },
     });
 
     res.status(201).json({
@@ -154,23 +163,31 @@ pullRoute.post("/repos/:repoId/pulls/:prId/merge", verifyToken("user"), loadRepo
 
   const { prId, repoId } = req.params;
 
-  const pr = await PullModel.findById(prId);
+  try {
+    const pr = await applyPullRequestMerge(prId, repoId);
 
-  if (!pr || pr.repoId.toString() !== repoId) {
-    return res.status(404).json({
-      message: "pull request not found"
+    await recordActivity({
+      actor: req.user.userId,
+      type: "pr_merged",
+      repository: repoId,
+      payload: { pullRequestId: prId, title: pr.title },
     });
+
+    emitToRepo(repoId, "pr:merged", { repositoryId: repoId, pullRequestId: prId, pullRequest: pr.toObject?.() || pr });
+
+    auditFromRequest(req, {
+      action: "pr.merge",
+      resourceType: "pull_request",
+      resourceId: prId,
+      metadata: { repoId, title: pr.title },
+    });
+
+    res.status(200).json({
+      message: "pull request merged",
+      payload: pr
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ message: err.message });
   }
-
-  pr.status = "MERGED";
-
-  await pr.save();
-
-  emitToRepo(repoId, "pr:merged", { repositoryId: repoId, pullRequestId: prId, pullRequest: pr.toObject?.() || pr });
-
-  res.status(200).json({
-    message: "pull request merged",
-    payload: pr
-  });
 
 });

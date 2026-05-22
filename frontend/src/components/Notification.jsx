@@ -1,61 +1,16 @@
-import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import React, { useEffect } from 'react';
 import { Bell, Check } from 'lucide-react';
-import { useSocket } from '../contexts/SocketContext';
+import useNotifications from '../hooks/useNotifications';
 
 function Notification() {
-  const [notifications, setNotifications] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const { subscribe } = useSocket();
+  const { data: notifications = [], isLoading, setupSocket, markAllRead, markAsRead } = useNotifications();
 
   useEffect(() => {
-    const fetchNotifications = async () => {
-      try {
-        const res = await axios.get('http://localhost:5001/notification-api/notifications', {
-          withCredentials: true
-        });
-        setNotifications(res.data.payload || res.data);
-      } catch (err) {
-        console.error("Error fetching notifications", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchNotifications();
-  }, []);
-
-  useEffect(() => {
-    const unsub = subscribe('notification:new', (data) => {
-      if (data?.notification) {
-        setNotifications((prev) => [data.notification, ...prev]);
-      }
-    });
+    const unsub = setupSocket();
     return unsub;
-  }, [subscribe]);
+  }, [setupSocket]);
 
-  const markAllRead = async () => {
-    try {
-      await axios.patch('http://localhost:5001/notification-api/notifications/read-all', {}, {
-        withCredentials: true,
-      });
-      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const markAsRead = async (id) => {
-    try {
-      await axios.patch(`http://localhost:5001/notification-api/notifications/${id}/read`, {}, {
-        withCredentials: true
-      });
-      setNotifications((prev) => prev.map((n) => (n._id === id ? { ...n, read: true } : n)));
-    } catch (err) {
-      console.error("Error marking as read", err);
-    }
-  };
-
-  if (loading) return <div className="p-10 text-center">Loading notifications...</div>;
+  if (isLoading) return <div className="p-10 text-center">Loading notifications...</div>;
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">

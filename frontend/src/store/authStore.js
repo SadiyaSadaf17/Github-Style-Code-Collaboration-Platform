@@ -1,5 +1,12 @@
 import { create } from 'zustand';
-import api, { clearOAuthTokens, setOAuthTokens, getAccessToken } from '../services/api.js';
+import api, {
+  clearOAuthTokens,
+  setOAuthTokens,
+  getAccessToken,
+  getRefreshToken,
+  attemptTokenRefresh,
+} from '../services/api.js';
+import { setAuthBootstrapping, hasPersistedSession } from '../utils/authSession.js';
 
 function readStoredUser() {
   try {
@@ -10,49 +17,61 @@ function readStoredUser() {
   }
 }
 
-export const useAuth = create((set, get) => ({
+async function fetchCurrentUser() {
+  const res = await api.get('/user-api/users/me');
+  return res.data.payload || res.data.user;
+}
+
+export const useAuth = create((set) => ({
   currentUser: readStoredUser(),
   loading: false,
   bootstrapping: true,
-  isAuthenticated: !!readStoredUser() || !!getAccessToken(),
+  isAuthenticated: hasPersistedSession(),
   error: null,
 
   bootstrap: async () => {
+    setAuthBootstrapping(true);
     set({ bootstrapping: true, error: null });
+
     const stored = readStoredUser();
-    const hasOAuth = !!getAccessToken();
+    if (!hasPersistedSession()) {
+      set({ currentUser: null, isAuthenticated: false, bootstrapping: false });
+      setAuthBootstrapping(false);
+      return;
+    }
 
     try {
-      if (hasOAuth) {
-        const res = await api.get('/auth/profile');
-        const user = res.data.payload || res.data.user;
-        if (user) {
-          localStorage.setItem('user', JSON.stringify(user));
-          set({ currentUser: user, isAuthenticated: true, bootstrapping: false });
-          window.dispatchEvent(new Event('app-auth-changed'));
-          return;
+      let user;
+      try {
+        user = await fetchCurrentUser();
+      } catch (firstErr) {
+        if (firstErr.response?.status === 401 && getRefreshToken()) {
+          const refreshed = await attemptTokenRefresh();
+          if (refreshed) {
+            user = await fetchCurrentUser();
+          } else {
+            throw firstErr;
+          }
+        } else {
+          throw firstErr;
         }
       }
 
-      if (stored) {
-        const res = await api.get('/user-api/users/me');
-        const user = res.data.payload || res.data.user;
+      if (user) {
         localStorage.setItem('user', JSON.stringify(user));
         set({ currentUser: user, isAuthenticated: true, bootstrapping: false });
         window.dispatchEvent(new Event('app-auth-changed'));
+        setAuthBootstrapping(false);
         return;
       }
-
-      set({ currentUser: null, isAuthenticated: false, bootstrapping: false });
     } catch {
-      if (stored) {
-        set({ currentUser: stored, isAuthenticated: true, bootstrapping: false });
-      } else {
-        localStorage.removeItem('user');
-        clearOAuthTokens();
-        set({ currentUser: null, isAuthenticated: false, bootstrapping: false });
-      }
+      /* session invalid */
     }
+
+    localStorage.removeItem('user');
+    clearOAuthTokens();
+    set({ currentUser: null, isAuthenticated: false, bootstrapping: false });
+    setAuthBootstrapping(false);
   },
 
   login: async (userCredObj) => {
@@ -60,6 +79,9 @@ export const useAuth = create((set, get) => ({
       set({ loading: true, error: null });
       const res = await api.post('/user-api/login', userCredObj);
       const user = res.data.user || res.data.payload;
+      if (res.data.token) {
+        setOAuthTokens(res.data.token, res.data.refreshToken);
+      }
       localStorage.setItem('user', JSON.stringify(user));
       window.dispatchEvent(new Event('app-auth-changed'));
       set({ loading: false, error: null, isAuthenticated: true, currentUser: user });
@@ -81,15 +103,17 @@ export const useAuth = create((set, get) => ({
     const user = res.data.payload || res.data.user;
     localStorage.setItem('user', JSON.stringify(user));
     window.dispatchEvent(new Event('app-auth-changed'));
-    set({ currentUser: user, isAuthenticated: true, error: null });
+    set({ currentUser: user, isAuthenticated: true, error: null, bootstrapping: false });
     return user;
   },
 
   logout: async () => {
     try {
       set({ loading: true, error: null });
-      await api.post('/user-api/logout').catch(() => {});
-      await api.post('/auth/logout').catch(() => {});
+      const refreshToken = getRefreshToken();
+      const body = refreshToken ? { refreshToken } : {};
+      await api.post('/user-api/logout', body).catch(() => {});
+      await api.post('/auth/logout', body).catch(() => {});
     } catch (err) {
       console.error('Logout failed', err);
     } finally {

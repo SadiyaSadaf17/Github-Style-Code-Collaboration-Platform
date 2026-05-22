@@ -22,6 +22,7 @@
   "type": "module",
   "dependencies": {
     "bcryptjs": "^3.0.3",
+    "bullmq": "^5.34.5",
     "cloudinary": "^1.41.3",
     "compression": "^1.7.4",
     "cookie-parser": "^1.4.7",

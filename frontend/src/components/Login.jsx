@@ -8,15 +8,17 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const { login, loading, error, isAuthenticated } = useAuth();
+  const { login, loading, error, isAuthenticated, bootstrapping } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const flash = location.state?.message;
   const from = location.state?.from || '/';
 
   useEffect(() => {
-    if (isAuthenticated) navigate(from, { replace: true });
-  }, [isAuthenticated, navigate, from]);
+    if (isAuthenticated && !bootstrapping) {
+      navigate(from, { replace: true });
+    }
+  }, [isAuthenticated, bootstrapping, navigate, from]);
 
   const handleLogin = async (e) => {
     e.preventDefault();

@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import axios from 'axios';
+import api from '../services/api.js';
 import { ChevronDown, ChevronRight, FileCode, Plus, Minus } from 'lucide-react';
 import { useSocket } from '../contexts/SocketContext';
 
-function DiffLine({ change }) {
+function DiffLine({ change, filename, onReviewLine }) {
   const bg =
     change.type === 'add'
       ? 'bg-[#dafbe1]'
@@ -21,8 +21,23 @@ function DiffLine({ change }) {
         ? change.oldLineNumber
         : change.oldLineNumber ?? change.lineNumber;
 
+  const lineNum = change.newLineNumber ?? change.oldLineNumber ?? change.lineNumber;
+
+  const handleClick = () => {
+    if (!onReviewLine || lineNum == null) return;
+    onReviewLine({ path: filename, line: lineNum, side: change.type === 'remove' ? 'LEFT' : 'RIGHT' });
+  };
+
   return (
-    <div className={`flex font-mono text-xs leading-5 ${bg} border-b border-gray-100`}>
+    <div
+      role={onReviewLine ? 'button' : undefined}
+      tabIndex={onReviewLine ? 0 : undefined}
+      onClick={onReviewLine ? handleClick : undefined}
+      onKeyDown={onReviewLine ? (e) => e.key === 'Enter' && handleClick() : undefined}
+      className={`flex font-mono text-xs leading-5 ${bg} border-b border-gray-100 ${
+        onReviewLine ? 'cursor-pointer hover:ring-1 hover:ring-inset hover:ring-[#0969da]' : ''
+      }`}
+    >
       <span className="w-12 shrink-0 text-right pr-2 text-gray-400 select-none border-r border-gray-200 bg-[#f6f8fa]">
         {lineLabel ?? ''}
       </span>
@@ -44,7 +59,7 @@ function DiffLine({ change }) {
   );
 }
 
-function FileDiffBlock({ file, defaultExpanded }) {
+function FileDiffBlock({ file, defaultExpanded, onReviewLine }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
 
   const statusBadge =
@@ -84,7 +99,12 @@ function FileDiffBlock({ file, defaultExpanded }) {
       {expanded && (
         <div className="overflow-x-auto">
           {file.changes?.map((change, idx) => (
-            <DiffLine key={`${change.type}-${idx}-${change.lineNumber}`} change={change} />
+            <DiffLine
+              key={`${change.type}-${idx}-${change.lineNumber}`}
+              change={change}
+              filename={file.filename}
+              onReviewLine={onReviewLine}
+            />
           ))}
         </div>
       )}
@@ -92,7 +112,7 @@ function FileDiffBlock({ file, defaultExpanded }) {
   );
 }
 
-function PRDiffViewer({ repoId, prId, fromBranch, toBranch }) {
+function PRDiffViewer({ repoId, prId, fromBranch, toBranch, onReviewLine }) {
   const { subscribe } = useSocket();
   const [diffData, setDiffData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -103,10 +123,7 @@ function PRDiffViewer({ repoId, prId, fromBranch, toBranch }) {
     if (!repoId || !prId) return;
     try {
       setError(null);
-      const res = await axios.get(
-        `http://localhost:5001/pull-api/repos/${repoId}/pulls/${prId}/diff`,
-        { withCredentials: true }
-      );
+      const res = await api.get(`/pull-api/repos/${repoId}/pulls/${prId}/diff`);
       const payload = res.data.payload || { files: [] };
       setDiffData(payload);
       setActiveFileIndex(0);
@@ -197,9 +214,9 @@ function PRDiffViewer({ repoId, prId, fromBranch, toBranch }) {
 
       <div className="space-y-0">
         {files.length === 1 ? (
-          <FileDiffBlock file={files[0]} defaultExpanded />
+          <FileDiffBlock file={files[0]} defaultExpanded onReviewLine={onReviewLine} />
         ) : (
-          <FileDiffBlock file={files[activeFileIndex]} defaultExpanded />
+          <FileDiffBlock file={files[activeFileIndex]} defaultExpanded onReviewLine={onReviewLine} />
         )}
       </div>
 
@@ -210,7 +227,7 @@ function PRDiffViewer({ repoId, prId, fromBranch, toBranch }) {
           </summary>
           <div className="mt-4 space-y-4">
             {files.map((file, idx) => (
-              <FileDiffBlock key={file.filename} file={file} defaultExpanded={idx === 0} />
+              <FileDiffBlock key={file.filename} file={file} defaultExpanded={idx === 0} onReviewLine={onReviewLine} />
             ))}
           </div>
         </details>

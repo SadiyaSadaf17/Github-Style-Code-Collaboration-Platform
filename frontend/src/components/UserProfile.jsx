@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import axios from 'axios';
+import api from '../services/api.js';
 import { Book, Users, Star } from 'lucide-react';
 import { getUserAvatarUrl } from '../utils/userAvatar.js';
 
@@ -12,7 +12,7 @@ function UserProfile() {
   useEffect(() => {
     const fetchUserData = async () => {
       try {
-        const response = await axios.get(`http://localhost:5001/user-api/users/profile/${username}`);
+        const response = await api.get(`/user-api/users/profile/${username}`);
         setProfile(response.data.payload || response.data);
       } catch (err) {
         console.error('User not found', err);
@@ -26,7 +26,7 @@ function UserProfile() {
   // Handle Follow Logic (using your repo structure)
   const handleFollow = async () => {
     try {
-      await axios.post(`http://localhost:4000/user-api/users/${profile._id}/follow`, {}, {
+      await api.post(`/user-api/users/${profile._id}/follow`, {}, {
         withCredentials: true
       });
       alert("Following!");

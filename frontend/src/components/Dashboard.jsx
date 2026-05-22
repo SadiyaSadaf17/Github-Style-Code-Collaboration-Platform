@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus } from 'lucide-react';
-import api from '../services/api';
+import api from '../services/api.js';
+import ActivityFeed from './ActivityFeed';
 import { useAuth } from '../store/authStore';
 import { getUserAvatarUrl } from '../utils/userAvatar.js';
 import RepoCard from './repo/RepoCard';
@@ -11,16 +12,19 @@ function Dashboard() {
   const { currentUser } = useAuth();
   const [myRepos, setMyRepos] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [visibilityFilter, setVisibilityFilter] = useState('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
 
   const fetchRepos = async () => {
     try {
+      setError('');
       const res = await api.get('/repo-api/repos');
       setMyRepos(res.data.payload || []);
     } catch (err) {
       console.error('Dashboard fetch error:', err);
+      setError(err.response?.data?.message || 'Could not load your repositories.');
     } finally {
       setLoading(false);
     }
@@ -28,6 +32,12 @@ function Dashboard() {
 
   useEffect(() => {
     fetchRepos();
+    const onAuthChange = () => {
+      setLoading(true);
+      fetchRepos();
+    };
+    window.addEventListener('app-auth-changed', onAuthChange);
+    return () => window.removeEventListener('app-auth-changed', onAuthChange);
   }, []);
 
   const filteredRepos = useMemo(() => {
@@ -88,31 +98,36 @@ function Dashboard() {
         </select>
       </div>
 
-      {filteredRepos.length === 0 ? (
-        <div className="border border-dashed border-gray-300 rounded-lg p-12 text-center bg-[#f6f8fa]">
-          <h2 className="text-lg font-medium text-gray-700">No repositories match</h2>
-          <p className="text-sm text-gray-500 mt-2">Create one or adjust your filters.</p>
-          <Link to="/explore" className="inline-block mt-4 text-[#0969da] text-sm hover:underline">
-            Explore public repositories
-          </Link>
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
+        <div className="xl:col-span-2">
+          {error ? (
+            <div className="border border-red-200 rounded-lg p-12 text-center bg-red-50 text-red-700">
+              <h2 className="text-lg font-medium">Unable to load repositories</h2>
+              <p className="text-sm text-red-500 mt-2">{error}</p>
+              <Link to="/explore" className="inline-block mt-4 text-[#0969da] text-sm hover:underline">
+                Explore public repositories
+              </Link>
+            </div>
+          ) : filteredRepos.length === 0 ? (
+            <div className="border border-dashed border-gray-300 rounded-lg p-12 text-center bg-[#f6f8fa]">
+              <h2 className="text-lg font-medium text-gray-700">No repositories match</h2>
+              <p className="text-sm text-gray-500 mt-2">Create one or adjust your filters.</p>
+              <Link to="/explore" className="inline-block mt-4 text-[#0969da] text-sm hover:underline">
+                Explore public repositories
+              </Link>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {filteredRepos.map((repo) => (
+                <RepoCard key={repo._id} repo={repo} />
+              ))}
+            </div>
+          )}
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filteredRepos.map((repo) => (
-            <RepoCard key={repo._id} repo={repo} />
-          ))}
+        <div className="xl:col-span-1">
+          <ActivityFeed scope="following" title="Following activity" />
         </div>
-      )}
-
-      <aside className="mt-10 pt-8 border-t border-gray-200">
-        <div className="flex items-center gap-3">
-          <img src={getUserAvatarUrl(currentUser)} alt="" className="w-10 h-10 rounded-full object-cover" />
-          <div>
-            <p className="font-semibold text-[#1f2328]">{currentUser?.name || currentUser?.username}</p>
-            <p className="text-sm text-gray-500">@{currentUser?.username}</p>
-          </div>
-        </div>
-      </aside>
+      </div>
 
       <CreateRepoModal
         open={showCreateModal}

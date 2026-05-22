@@ -1,41 +1,24 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import axios from 'axios';
 import { Bell } from 'lucide-react';
-import { useSocket } from '../contexts/SocketContext';
 import { useAuth } from '../store/authStore';
+import useNotifications from '../hooks/useNotifications';
 
 function NotificationBell() {
   const { isAuthenticated } = useAuth();
-  const { subscribe } = useSocket();
-  const [items, setItems] = useState([]);
+  const { data: items = [], setupSocket, refetch } = useNotifications();
   const [open, setOpen] = useState(false);
 
-  const fetchList = useCallback(async () => {
-    if (!isAuthenticated) return;
-    try {
-      const res = await axios.get('http://localhost:5001/notification-api/notifications', {
-        withCredentials: true,
-      });
-      setItems(res.data.payload || []);
-    } catch {
-      /* ignore */
-    }
-  }, [isAuthenticated]);
-
   useEffect(() => {
-    fetchList();
-  }, [fetchList]);
-
-  useEffect(() => {
-    if (!isAuthenticated) return undefined;
-    const unsub = subscribe('notification:new', (data) => {
-      if (data?.notification) {
-        setItems((prev) => [data.notification, ...prev]);
-      }
-    });
+    const unsub = setupSocket();
     return unsub;
-  }, [isAuthenticated, subscribe]);
+  }, [setupSocket]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    // ensure we have fresh notifications when user becomes authenticated
+    refetch();
+  }, [isAuthenticated, refetch]);
 
   if (!isAuthenticated) return null;
 
@@ -47,7 +30,7 @@ function NotificationBell() {
         type="button"
         onClick={() => {
           setOpen((o) => !o);
-          if (!open) fetchList();
+          if (!open) refetch();
         }}
         className="relative p-1 hover:text-blue-400 rounded-md"
         aria-label="Notifications"
@@ -80,8 +63,7 @@ function NotificationBell() {
                 {items.slice(0, 12).map((n) => (
                   <li
                     key={n._id}
-                    className={`px-3 py-2 text-sm ${n.read ? 'bg-gray-50' : 'bg-blue-50/50'}`}
-                  >
+                    className={`px-3 py-2 text-sm ${n.read ? 'bg-gray-50' : 'bg-blue-50/50'}`}>
                     <p className="font-medium text-gray-900 line-clamp-1">{n.title || n.type}</p>
                     <p className="text-gray-600 text-xs mt-0.5 line-clamp-2">{n.message}</p>
                   </li>

@@ -4,3 +4,11 @@
   border-left: 2px solid #cf222e;
   margin-left: 2px;
 }
+
+.collab-selection {
+  background-color: rgba(9, 105, 218, 0.15);
+}
+
+.collab-selection-inline {
+  background-color: rgba(9, 105, 218, 0.2);
+}

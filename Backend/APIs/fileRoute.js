@@ -148,6 +148,49 @@ fileRoute.patch("/repos/:repoId/file", verifyToken("user"), loadRepo("repoId"), 
 });
 
 
+// Rename or move a file (single path)
+fileRoute.patch("/repos/:repoId/file/move", verifyToken("user"), loadRepo("repoId"), requireRepoWrite, async (req, res) => {
+  try {
+    const repoId = req.params.repoId;
+    const fromPath = req.body.fromPath || req.query.from;
+    const toPath = req.body.toPath;
+
+    if (!fromPath || !toPath) {
+      return res.status(400).json({ message: "fromPath and toPath are required" });
+    }
+    if (fromPath === toPath) {
+      return res.status(400).json({ message: "Paths must be different" });
+    }
+
+    const file = await FileModel.findOne({ repoId, path: fromPath });
+    if (!file) {
+      return res.status(404).json({ message: "file not found" });
+    }
+
+    const collision = await FileModel.findOne({ repoId, path: toPath });
+    if (collision) {
+      return res.status(400).json({ message: "A file already exists at the target path" });
+    }
+
+    file.path = toPath;
+    await file.save();
+    await notifyOpenPullDiffs(repoId);
+
+    emitToRepo(repoId, "file:renamed", {
+      repositoryId: repoId,
+      fromPath,
+      toPath,
+    });
+
+    res.status(200).json({
+      message: "file moved",
+      payload: file,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // delete file
 fileRoute.delete("/repos/:repoId/file", verifyToken("user"), loadRepo("repoId"), requireRepoWrite, async (req, res) => {
   try {
@@ -163,6 +206,11 @@ fileRoute.delete("/repos/:repoId/file", verifyToken("user"), loadRepo("repoId"),
     }
 
     await notifyOpenPullDiffs(repoId);
+
+    emitToRepo(repoId, "file:deleted", {
+      repositoryId: repoId,
+      path,
+    });
 
     res.status(200).json({
       message: "file deleted",

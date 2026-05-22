@@ -2,45 +2,38 @@ import express from 'express';
 import passport from 'passport';
 import jwt from 'jsonwebtoken';
 import { UserTypeModel } from '../models/userModel.js';
+import {
+  generateTokenPair,
+  persistRefreshToken,
+  verifyStoredRefreshToken,
+  revokeRefreshToken,
+  setAccessTokenCookie,
+  clearAccessTokenCookie,
+  extractTokenFromRequest,
+} from '../services/tokenService.js';
 
 const oauthRouter = express.Router();
 
-// Generate JWT token
-const generateToken = (user) => {
-  const accessToken = jwt.sign(
-    { userId: user._id, email: user.email, role: user.role },
-    process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN || '15m' }
-  );
-
-  const refreshToken = jwt.sign(
-    { userId: user._id },
-    process.env.JWT_REFRESH_SECRET,
-    { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d' }
-  );
-
+async function issueTokensForUser(user, req) {
+  const { accessToken, refreshToken } = generateTokenPair(user);
+  await persistRefreshToken(user._id, refreshToken, req);
   return { accessToken, refreshToken };
-};
+}
 
-// Google OAuth - Initiate
 oauthRouter.get('/google', passport.authenticate('google', {
   scope: ['profile', 'email']
 }));
 
-// Google OAuth - Callback
 oauthRouter.get('/google/callback',
   passport.authenticate('google', { failureRedirect: '/login' }),
-  (req, res) => {
+  async (req, res) => {
     try {
-      const { accessToken, refreshToken } = generateToken(req.user);
-      
-      // Redirect to frontend with tokens
+      const { accessToken, refreshToken } = await issueTokensForUser(req.user, req);
       const base = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
       const redirectUrl = new URL(`${base}/oauth/callback`);
       redirectUrl.searchParams.append('access_token', accessToken);
       redirectUrl.searchParams.append('refresh_token', refreshToken);
       redirectUrl.searchParams.append('user_id', req.user._id);
-      
       res.redirect(redirectUrl.toString());
     } catch (error) {
       res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent(error.message)}`);
@@ -48,25 +41,20 @@ oauthRouter.get('/google/callback',
   }
 );
 
-// GitHub OAuth - Initiate
 oauthRouter.get('/github', passport.authenticate('github', {
   scope: ['user:email', 'read:user']
 }));
 
-// GitHub OAuth - Callback
 oauthRouter.get('/github/callback',
   passport.authenticate('github', { failureRedirect: '/login' }),
-  (req, res) => {
+  async (req, res) => {
     try {
-      const { accessToken, refreshToken } = generateToken(req.user);
-      
-      // Redirect to frontend with tokens
+      const { accessToken, refreshToken } = await issueTokensForUser(req.user, req);
       const base = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
       const redirectUrl = new URL(`${base}/oauth/callback`);
       redirectUrl.searchParams.append('access_token', accessToken);
       redirectUrl.searchParams.append('refresh_token', refreshToken);
       redirectUrl.searchParams.append('user_id', req.user._id);
-      
       res.redirect(redirectUrl.toString());
     } catch (error) {
       res.redirect(`${process.env.FRONTEND_URL}/login?error=${encodeURIComponent(error.message)}`);
@@ -74,7 +62,6 @@ oauthRouter.get('/github/callback',
   }
 );
 
-// Refresh token endpoint
 oauthRouter.post('/refresh', async (req, res) => {
   try {
     const { refreshToken } = req.body;
@@ -83,14 +70,25 @@ oauthRouter.post('/refresh', async (req, res) => {
       return res.status(400).json({ message: 'Refresh token is required' });
     }
 
-    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
-    const user = await UserTypeModel.findById(decoded.userId);
+    const decoded = jwt.verify(
+      refreshToken,
+      process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET
+    );
 
-    if (!user) {
-      return res.status(401).json({ message: 'UserTypeModel not found' });
+    const stored = await verifyStoredRefreshToken(decoded.userId, refreshToken);
+    if (!stored) {
+      return res.status(401).json({ message: 'Refresh token revoked or invalid' });
     }
 
-    const { accessToken, refreshToken: newRefreshToken } = generateToken(user);
+    const user = await UserTypeModel.findById(decoded.userId);
+    if (!user) {
+      return res.status(401).json({ message: 'User not found' });
+    }
+
+    await revokeRefreshToken(decoded.userId, refreshToken);
+    const { accessToken, refreshToken: newRefreshToken } = await issueTokensForUser(user, req);
+
+    setAccessTokenCookie(res, accessToken);
 
     res.status(200).json({
       message: 'Token refreshed successfully',
@@ -110,17 +108,15 @@ oauthRouter.post('/refresh', async (req, res) => {
   }
 });
 
-// Get current user profile
 oauthRouter.get('/profile', async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const token = extractTokenFromRequest(req);
+    if (!token) {
       return res.status(401).json({ message: 'Authorization token is required' });
     }
 
-    const token = authHeader.substring(7);
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await UserTypeModel.findById(decoded.userId).select('-password');
+    const user = await UserTypeModel.findById(decoded.userId).select('-password -refreshTokens');
 
     res.status(200).json({
       message: 'Profile fetched successfully',
@@ -131,8 +127,21 @@ oauthRouter.get('/profile', async (req, res) => {
   }
 });
 
-// Logout endpoint
-oauthRouter.post('/logout', (req, res) => {
+oauthRouter.post('/logout', async (req, res) => {
+  try {
+    const { refreshToken } = req.body || {};
+    if (refreshToken) {
+      const decoded = jwt.verify(
+        refreshToken,
+        process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET
+      );
+      await revokeRefreshToken(decoded.userId, refreshToken);
+    }
+  } catch {
+    /* ignore */
+  }
+
+  clearAccessTokenCookie(res);
   req.logout((err) => {
     if (err) {
       return res.status(500).json({ message: 'Logout failed', error: err.message });

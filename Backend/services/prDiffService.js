@@ -137,3 +137,34 @@ export async function buildPullRequestDiff(prId, repoId) {
     files,
   };
 }
+
+/**
+ * Merge PR: remove files deleted vs opening snapshot; head content already lives in DB.
+ */
+export async function applyPullRequestMerge(prId, repoId) {
+  const pr = await PullModel.findById(prId);
+  if (!pr || pr.repoId.toString() !== repoId.toString()) {
+    const err = new Error("Pull request not found");
+    err.status = 404;
+    throw err;
+  }
+  if (pr.status === "MERGED") {
+    const err = new Error("Pull request already merged");
+    err.status = 400;
+    throw err;
+  }
+
+  const snapshots = pr.fileSnapshots || [];
+  const currentFiles = await FileModel.find({ repoId }).select("path");
+  const headPaths = new Set(currentFiles.map((f) => f.path));
+
+  for (const snap of snapshots) {
+    if (!headPaths.has(snap.filename)) {
+      await FileModel.deleteOne({ repoId, path: snap.filename });
+    }
+  }
+
+  pr.status = "MERGED";
+  await pr.save();
+  return pr;
+}

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import axios from 'axios';
+import api from '../services/api.js';
 import { MessageSquare, User, Calendar } from 'lucide-react';
 import { useSocket } from '../contexts/SocketContext';
 
@@ -14,12 +14,44 @@ function IssueDetail() {
   const [reviewPath, setReviewPath] = useState('');
   const [reviewLine, setReviewLine] = useState('');
   const [reviewSide, setReviewSide] = useState('RIGHT');
+  const [labelInput, setLabelInput] = useState('');
+  const [savingMeta, setSavingMeta] = useState(false);
   const { joinRepo, leaveRepo, subscribe } = useSocket();
 
+  const handleAddLabel = async () => {
+    const name = labelInput.trim();
+    if (!name || !issue) return;
+    const labels = [...(issue.labels || [])];
+    if (labels.some((l) => l.name === name)) return;
+    labels.push({ name, color: '#0969da' });
+    setSavingMeta(true);
+    try {
+      const res = await api.patch(`/issue-api/repos/${repoId}/issues/${issueId}`, { labels });
+      setIssue(res.data.payload);
+      setLabelInput('');
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to update labels');
+    } finally {
+      setSavingMeta(false);
+    }
+  };
+
+  const handleToggleState = async () => {
+    if (!issue) return;
+    const next = issue.state === 'closed' ? 'open' : 'closed';
+    setSavingMeta(true);
+    try {
+      const res = await api.patch(`/issue-api/repos/${repoId}/issues/${issueId}`, { state: next });
+      setIssue(res.data.payload);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to update issue');
+    } finally {
+      setSavingMeta(false);
+    }
+  };
+
   const loadComments = useCallback(async () => {
-    const commentRes = await axios.get(`http://localhost:5001/comment-api/issues/${issueId}/comments`, {
-      withCredentials: true,
-    });
+    const commentRes = await api.get(`/comment-api/issues/${issueId}/comments`);
     setComments(commentRes.data.payload || []);
   }, [issueId]);
 
@@ -27,15 +59,11 @@ function IssueDetail() {
     const fetchData = async () => {
       try {
         // Fetch repo info
-        const repoRes = await axios.get(`http://localhost:5001/repo-api/repos/${repoId}`, {
-          withCredentials: true
-        });
+        const repoRes = await api.get(`/repo-api/repos/${repoId}`);
         setRepoInfo(repoRes.data.payload || repoRes.data);
 
         // Fetch issue
-        const issueRes = await axios.get(`http://localhost:5001/issue-api/repos/${repoId}/issues/${issueId}`, {
-          withCredentials: true
-        });
+        const issueRes = await api.get(`/issue-api/repos/${repoId}/issues/${issueId}`);
         setIssue(issueRes.data.payload || issueRes.data);
 
         await loadComments();
@@ -70,7 +98,7 @@ function IssueDetail() {
         if (!Number.isNaN(ln)) payload.line = ln;
         payload.side = reviewSide === 'LEFT' ? 'LEFT' : 'RIGHT';
       }
-      await axios.post(`http://localhost:5001/comment-api/issues/${issueId}/comments`, payload, { withCredentials: true });
+      await api.post(`/comment-api/issues/${issueId}/comments`, payload);
       setNewComment('');
       setReviewPath('');
       setReviewLine('');
@@ -112,6 +140,43 @@ function IssueDetail() {
             <span>{new Date(issue.createdAt).toLocaleDateString()}</span>
           </div>
         </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2 mb-4 items-center">
+        {(issue.labels || []).map((lbl) => (
+          <span
+            key={lbl.name}
+            className="text-xs px-2 py-0.5 rounded-full font-medium text-white"
+            style={{ backgroundColor: lbl.color || '#0969da' }}
+          >
+            {lbl.name}
+          </span>
+        ))}
+        <div className="flex gap-1">
+          <input
+            type="text"
+            value={labelInput}
+            onChange={(e) => setLabelInput(e.target.value)}
+            placeholder="Add label"
+            className="px-2 py-1 text-sm border border-gray-300 rounded-md"
+          />
+          <button
+            type="button"
+            disabled={savingMeta}
+            onClick={handleAddLabel}
+            className="px-2 py-1 text-sm bg-[#f6f8fa] border border-gray-300 rounded-md hover:bg-gray-100"
+          >
+            Add
+          </button>
+        </div>
+        <button
+          type="button"
+          disabled={savingMeta}
+          onClick={handleToggleState}
+          className="ml-auto px-3 py-1 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+        >
+          {issue.state === 'closed' ? 'Reopen issue' : 'Close issue'}
+        </button>
       </div>
 
       {/* Issue Description */}

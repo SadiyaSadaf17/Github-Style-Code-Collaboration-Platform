@@ -1,13 +1,22 @@
-import React from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { Github, Plus, ChevronDown } from 'lucide-react';
 import NotificationBell from './NotificationBell.jsx';
 import { useAuth } from '../store/authStore.js';
 import { getUserAvatarUrl } from '../utils/userAvatar.js';
 
 function Header() {
-  // Pull reactive state and actions from the store
   const { currentUser, isAuthenticated, logout } = useAuth();
+  const navigate = useNavigate();
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const handleSearchSubmit = (e) => {
+    e.preventDefault();
+    const q = searchQuery.trim();
+    if (q.length >= 2) {
+      navigate(`/search?q=${encodeURIComponent(q)}`);
+    }
+  };
 
   return (
     <header className="flex items-center justify-between px-4 py-3 bg-[#24292f] text-white sticky top-0 z-50">
@@ -17,16 +26,18 @@ function Header() {
           <Github size={32} />
         </Link>
         
-        <div className="relative group hidden md:block">
-          <input 
-            type="text" 
-            placeholder="Search or jump to..." 
+        <form onSubmit={handleSearchSubmit} className="relative group hidden md:block">
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search repositories… (Ctrl+K)"
             className="bg-[#1b1f23] border border-gray-600 rounded-md px-3 py-1 text-sm w-64 focus:w-80 focus:bg-white focus:text-black transition-all outline-none"
           />
-          <kbd className="absolute right-2 top-1.5 px-1.5 py-0.5 text-[10px] font-sans font-semibold text-gray-400 border border-gray-600 rounded bg-[#1b1f23]">
+          <kbd className="absolute right-2 top-1.5 px-1.5 py-0.5 text-[10px] font-sans font-semibold text-gray-400 border border-gray-600 rounded bg-[#1b1f23] pointer-events-none">
             /
           </kbd>
-        </div>
+        </form>
 
         <nav className="hidden lg:flex gap-4 text-sm font-semibold">
           <Link to="/pulls" className="hover:text-gray-300">Pull requests</Link>

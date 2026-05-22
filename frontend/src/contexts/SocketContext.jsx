@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useCallback, useMemo, useState } from 'react';
 import { io } from 'socket.io-client';
+import { getSocketAuthToken } from '../services/api.js';
 
 const SocketContext = createContext(null);
 
@@ -17,10 +18,16 @@ export const SocketProvider = ({ children }) => {
 
   useEffect(() => {
     const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5001';
-    const s = io(backendUrl, {
-      withCredentials: true,
-      transports: ['websocket', 'polling'],
-    });
+    const connectSocket = () => {
+      const token = getSocketAuthToken();
+      return io(backendUrl, {
+        withCredentials: true,
+        transports: ['websocket', 'polling'],
+        auth: token ? { token } : {},
+      });
+    };
+
+    const s = connectSocket();
     socketRef.current = s;
 
     const joinUserRoom = () => {
@@ -48,7 +55,14 @@ export const SocketProvider = ({ children }) => {
 
     joinUserRoom();
 
-    const onAuthOrStorage = () => joinUserRoom();
+    const onAuthOrStorage = () => {
+      joinUserRoom();
+      const token = getSocketAuthToken();
+      if (token) {
+        s.auth = { token };
+        if (!s.connected) s.connect();
+      }
+    };
     window.addEventListener('app-auth-changed', onAuthOrStorage);
     window.addEventListener('storage', onAuthOrStorage);
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import axios from 'axios';
+import api from '../services/api.js';
 import { User, Calendar, MessageSquare } from 'lucide-react';
 import { useSocket } from '../contexts/SocketContext';
 import PRDiffViewer from './PRDiffViewer';
@@ -18,23 +18,17 @@ function PullRequestDetail() {
   const { joinRepo, leaveRepo, subscribe } = useSocket();
 
   const loadComments = useCallback(async () => {
-    const commentRes = await axios.get(`http://localhost:5001/comment-api/pulls/${prId}/comments`, {
-      withCredentials: true,
-    });
+    const commentRes = await api.get(`/comment-api/pulls/${prId}/comments`);
     setComments(commentRes.data.payload || []);
   }, [prId]);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const repoRes = await axios.get(`http://localhost:5001/repo-api/repos/${repoId}`, {
-          withCredentials: true,
-        });
+        const repoRes = await api.get(`/repo-api/repos/${repoId}`);
         setRepoInfo(repoRes.data.payload || repoRes.data);
 
-        const prRes = await axios.get(`http://localhost:5001/pull-api/repos/${repoId}/pulls/${prId}`, {
-          withCredentials: true,
-        });
+        const prRes = await api.get(`/pull-api/repos/${repoId}/pulls/${prId}`);
         setPr(prRes.data.payload || prRes.data);
 
         await loadComments();
@@ -77,9 +71,7 @@ function PullRequestDetail() {
         if (!Number.isNaN(ln)) payload.line = ln;
         payload.side = reviewSide === 'LEFT' ? 'LEFT' : 'RIGHT';
       }
-      await axios.post(`http://localhost:5001/comment-api/pulls/${prId}/comments`, payload, {
-        withCredentials: true,
-      });
+      await api.post(`/comment-api/pulls/${prId}/comments`, payload);
       setNewComment('');
       setReviewPath('');
       setReviewLine('');
@@ -91,11 +83,7 @@ function PullRequestDetail() {
 
   const handleMergePR = async () => {
     try {
-      await axios.post(
-        `http://localhost:5001/pull-api/repos/${repoId}/pulls/${prId}/merge`,
-        {},
-        { withCredentials: true }
-      );
+      await api.post(`/pull-api/repos/${repoId}/pulls/${prId}/merge`, {});
       setPr((prev) => (prev ? { ...prev, status: 'MERGED' } : prev));
       alert('Pull request merged successfully!');
     } catch (err) {
@@ -166,11 +154,18 @@ function PullRequestDetail() {
         <p className="text-gray-800 whitespace-pre-wrap">{pr.description}</p>
       </div>
 
+      <p className="text-sm text-gray-600 mb-2">Click a diff line to start an inline review comment.</p>
       <PRDiffViewer
         repoId={repoId}
         prId={prId}
         fromBranch={pr.fromBranch}
         toBranch={pr.toBranch}
+        onReviewLine={({ path, line, side }) => {
+          setReviewPath(path);
+          setReviewLine(String(line));
+          setReviewSide(side);
+          document.getElementById('pr-review-form')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }}
       />
 
       <div className="mb-8">
@@ -202,7 +197,7 @@ function PullRequestDetail() {
           ))}
         </div>
 
-        <div className="bg-white border border-gray-300 rounded-md p-4 space-y-3">
+        <div id="pr-review-form" className="bg-white border border-gray-300 rounded-md p-4 space-y-3">
           <label className="block text-sm font-medium">Add a comment</label>
           <textarea
             value={newComment}

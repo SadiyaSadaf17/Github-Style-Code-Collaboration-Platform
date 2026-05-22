@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import axios from 'axios';
+import api from '../services/api.js';
 import { useNavigate } from 'react-router-dom';
 import { Info, Lock, Globe } from 'lucide-react';
 
@@ -24,11 +24,7 @@ function CreateRepo() {
       delete dataToSend.visibility;
 
       // withCredentials sends the 'token' cookie automatically from the browser
-      const response = await axios.post(
-        'http://localhost:5001/repo-api/repos', 
-        dataToSend, 
-        { withCredentials: true }
-      );
+      const response = await api.post('/repo-api/repos', dataToSend);
 
       navigate(`/repo/${response.data._id || response.data.payload._id}`);
     } catch (err) {

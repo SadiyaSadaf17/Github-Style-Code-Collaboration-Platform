@@ -1,28 +1,33 @@
-import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import React, { useEffect, useMemo, useState } from 'react';
+import api from '../services/api.js';
 import { Link } from 'react-router-dom';
 import { GitPullRequest, Plus } from 'lucide-react';
+import { repoTabCreateUrl } from '../utils/repoLinks.js';
 
 function PullRequests() {
   const [pullRequests, setPullRequests] = useState([]);
+  const [repos, setRepos] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  const newPrUrl = useMemo(
+    () => repoTabCreateUrl(repos[0]?._id, 'pulls'),
+    [repos]
+  );
 
   useEffect(() => {
     const fetchPullRequests = async () => {
       try {
-        // For now, we'll fetch PRs from all repositories the user has access to
-        // This is a simplified implementation - in a real app you'd want to aggregate PRs
-        const reposRes = await axios.get('http://localhost:5001/repo-api/repos', {
-          withCredentials: true
-        });
+        const reposRes = await api.get('/repo-api/repos');
+        const repoList = reposRes.data.payload || [];
+        setRepos(repoList);
 
         const allPRs = [];
-        for (const repo of reposRes.data.payload || []) {
+        for (const repo of repoList) {
           try {
-            const prsRes = await axios.get(`http://localhost:5001/pull-api/repos/${repo._id}/pulls`);
-            const repoPRs = (prsRes.data.payload || []).map(pr => ({
+            const prsRes = await api.get(`/pull-api/repos/${repo._id}/pulls`);
+            const repoPRs = (prsRes.data.payload || []).map((pr) => ({
               ...pr,
-              repository: repo
+              repository: repo,
             }));
             allPRs.push(...repoPRs);
           } catch (err) {
@@ -32,13 +37,19 @@ function PullRequests() {
 
         setPullRequests(allPRs);
       } catch (err) {
-        console.error("Error fetching pull requests:", err);
+        console.error('Error fetching pull requests:', err);
       } finally {
         setLoading(false);
       }
     };
 
     fetchPullRequests();
+    const onAuthChange = () => {
+      setLoading(true);
+      fetchPullRequests();
+    };
+    window.addEventListener('app-auth-changed', onAuthChange);
+    return () => window.removeEventListener('app-auth-changed', onAuthChange);
   }, []);
 
   if (loading) return <div className="p-10 text-center">Loading pull requests...</div>;
@@ -47,13 +58,23 @@ function PullRequests() {
     <div className="max-w-6xl mx-auto px-4 py-8">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold">Pull requests</h1>
-        <Link
-          to="/new"
-          className="bg-[#2da44e] text-white px-4 py-2 rounded-md hover:bg-[#2c974b] flex items-center gap-2"
-        >
-          <Plus size={16} />
-          New pull request
-        </Link>
+        {repos.length > 0 ? (
+          <Link
+            to={newPrUrl}
+            className="bg-[#2da44e] text-white px-4 py-2 rounded-md hover:bg-[#2c974b] flex items-center gap-2"
+          >
+            <Plus size={16} />
+            New pull request
+          </Link>
+        ) : (
+          <Link
+            to="/"
+            className="bg-[#2da44e] text-white px-4 py-2 rounded-md hover:bg-[#2c974b] flex items-center gap-2"
+          >
+            <Plus size={16} />
+            Create a repository first
+          </Link>
+        )}
       </div>
 
       <div className="space-y-4">
@@ -84,13 +105,22 @@ function PullRequests() {
             <GitPullRequest size={48} className="text-gray-300 mx-auto mb-4" />
             <h2 className="text-xl font-semibold text-gray-600 mb-2">No pull requests found</h2>
             <p className="text-gray-500 mb-4">There are no pull requests in your repositories yet.</p>
-            <Link
-              to="/new"
-              className="bg-[#2da44e] text-white px-4 py-2 rounded-md hover:bg-[#2c974b] inline-flex items-center gap-2"
-            >
-              <Plus size={16} />
-              Create your first pull request
-            </Link>
+            {repos.length > 0 ? (
+              <Link
+                to={newPrUrl}
+                className="bg-[#2da44e] text-white px-4 py-2 rounded-md hover:bg-[#2c974b] inline-flex items-center gap-2"
+              >
+                <Plus size={16} />
+                Create your first pull request
+              </Link>
+            ) : (
+              <Link
+                to="/"
+                className="text-[#0969da] hover:underline text-sm"
+              >
+                Go to dashboard to create a repository
+              </Link>
+            )}
           </div>
         )}
       </div>

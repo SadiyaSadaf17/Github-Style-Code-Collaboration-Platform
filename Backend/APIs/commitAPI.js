@@ -4,6 +4,7 @@ import { verifyToken } from "../middlewares/verifyToken.js";
 import { optionalVerifyToken } from "../middlewares/optionalVerifyToken.js";
 import { loadRepo, requireRepoRead, requireRepoWrite } from "../middlewares/repoAccessMiddleware.js";
 import crypto from "crypto";
+import { recordActivity } from "../services/activityService.js";
 
 export const commitRoute = exp.Router();
 
@@ -32,6 +33,13 @@ commitRoute.post("/repos/:repoId/commits", verifyToken("user"), loadRepo("repoId
     });
 
     await newCommit.save();
+
+    await recordActivity({
+      actor: req.user.userId,
+      type: "commit",
+      repository: repoId,
+      payload: { sha, message },
+    });
 
     res.status(201).json({
       message: "commit created",

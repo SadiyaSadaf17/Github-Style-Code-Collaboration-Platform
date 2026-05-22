@@ -1,5 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { repoBlobUrl } from '../../utils/repoPaths.js';
 
 export default function FileBreadcrumbs({ repoId, repoName, ownerName, filePath }) {
   const segments = filePath ? filePath.split('/').filter(Boolean) : [];
@@ -23,7 +24,7 @@ export default function FileBreadcrumbs({ repoId, repoName, ownerName, filePath 
               <span className="font-mono text-[#1f2328]">{seg}</span>
             ) : (
               <Link
-                to={`/repo/${repoId}/blob/${partial}`}
+                to={repoBlobUrl(repoId, partial)}
                 className="font-mono text-[#0969da] hover:underline"
               >
                 {seg}

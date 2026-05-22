@@ -1,6 +1,7 @@
 import exp from "express";
 import { RepoModel } from "../models/repoModel.js";
 import { UserTypeModel } from "../models/userModel.js";
+import { FileModel } from "../models/fileModel.js";
 import { verifyToken } from "../middlewares/verifyToken.js";
 import { optionalVerifyToken } from "../middlewares/optionalVerifyToken.js";
 import {
@@ -10,6 +11,8 @@ import {
   requireRepoRead,
 } from "../middlewares/repoAccessMiddleware.js";
 import { getRepoTeamRole, refToIdString } from "../services/repoAccessService.js";
+import { recordActivity } from "../services/activityService.js";
+import { auditFromRequest } from "../services/auditService.js";
 
 export const repoRoute = exp.Router();
 
@@ -17,6 +20,20 @@ function attachListAccess(repoDoc, userId) {
   const plain = repoDoc.toObject ? repoDoc.toObject() : { ...repoDoc };
   plain.myAccessRole = getRepoTeamRole(repoDoc, userId);
   return plain;
+}
+
+async function attachSocialFlags(repoPlain, userId) {
+  if (!userId) {
+    repoPlain.isStarred = false;
+    repoPlain.isWatched = false;
+    return repoPlain;
+  }
+  const user = await UserTypeModel.findById(userId).select("starredRepos watchedRepos");
+  if (!user) return repoPlain;
+  const id = repoPlain._id.toString();
+  repoPlain.isStarred = user.starredRepos.some((r) => r.toString() === id);
+  repoPlain.isWatched = (user.watchedRepos || []).some((r) => r.toString() === id);
+  return repoPlain;
 }
 
 // create repo
@@ -35,6 +52,13 @@ repoRoute.post("/repos", verifyToken("user"), async (req, res) => {
 
     const newRepo = new RepoModel(repoObj);
     await newRepo.save();
+
+    await recordActivity({
+      actor: req.user.userId,
+      type: "repo_created",
+      repository: newRepo._id,
+      payload: { name: newRepo.name },
+    });
 
     res.status(201).json({
       message: "repository created",
@@ -92,8 +116,9 @@ repoRoute.get(
   requireRepoRead,
   async (req, res) => {
     try {
-      const repo = req.repo.toObject ? req.repo.toObject() : { ...req.repo };
+      let repo = req.repo.toObject ? req.repo.toObject() : { ...req.repo };
       repo.currentUserRole = req.user?.userId ? getRepoTeamRole(req.repo, req.user.userId) : null;
+      repo = await attachSocialFlags(repo, req.user?.userId);
 
       res.status(200).json({
         message: "repository fetched",
@@ -139,6 +164,13 @@ repoRoute.patch("/repos/:id", verifyToken("user"), loadRepo("id"), requireRepoOw
 repoRoute.delete("/repos/:id", verifyToken("user"), loadRepo("id"), requireRepoOwner, async (req, res) => {
   try {
     const deletedRepo = await RepoModel.findByIdAndDelete(req.params.id);
+
+    auditFromRequest(req, {
+      action: "repo.delete",
+      resourceType: "repository",
+      resourceId: req.params.id,
+      metadata: { fullName: deletedRepo?.fullName },
+    });
 
     res.status(200).json({
       message: "repository deleted",
@@ -255,6 +287,122 @@ repoRoute.patch(
     }
   }
 );
+
+// Toggle star
+repoRoute.post("/repos/:id/star", verifyToken("user"), loadRepo("id"), requireRepoRead, async (req, res) => {
+  try {
+    const repoId = req.params.id;
+    const user = await UserTypeModel.findById(req.user.userId);
+    const idx = user.starredRepos.findIndex((r) => r.toString() === repoId);
+    let starred = false;
+
+    if (idx >= 0) {
+      user.starredRepos.splice(idx, 1);
+      await RepoModel.findByIdAndUpdate(repoId, { $inc: { "stats.stars": -1 } });
+    } else {
+      user.starredRepos.push(repoId);
+      await RepoModel.findByIdAndUpdate(repoId, { $inc: { "stats.stars": 1 } });
+      starred = true;
+    }
+    await user.save();
+
+    const repo = await RepoModel.findById(repoId);
+    res.status(200).json({
+      message: starred ? "Repository starred" : "Star removed",
+      payload: { starred, stars: Math.max(0, repo?.stats?.stars ?? 0) },
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Toggle watch
+repoRoute.post("/repos/:id/watch", verifyToken("user"), loadRepo("id"), requireRepoRead, async (req, res) => {
+  try {
+    const repoId = req.params.id;
+    const user = await UserTypeModel.findById(req.user.userId);
+    if (!user.watchedRepos) user.watchedRepos = [];
+    const idx = user.watchedRepos.findIndex((r) => r.toString() === repoId);
+    let watched = false;
+
+    if (idx >= 0) {
+      user.watchedRepos.splice(idx, 1);
+      await RepoModel.findByIdAndUpdate(repoId, { $inc: { "stats.watchers": -1 } });
+    } else {
+      user.watchedRepos.push(repoId);
+      await RepoModel.findByIdAndUpdate(repoId, { $inc: { "stats.watchers": 1 } });
+      watched = true;
+    }
+    await user.save();
+
+    const repo = await RepoModel.findById(repoId);
+    res.status(200).json({
+      message: watched ? "Watching repository" : "Unwatched",
+      payload: { watched, watchers: Math.max(0, repo?.stats?.watchers ?? 0) },
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Fork repository
+repoRoute.post("/repos/:id/fork", verifyToken("user"), loadRepo("id"), requireRepoRead, async (req, res) => {
+  try {
+    const source = req.repo;
+    const user = await UserTypeModel.findById(req.user.userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    let forkName = (req.body.name || `${source.name}-fork`).trim().toLowerCase().replace(/\s+/g, "-");
+    const exists = await RepoModel.findOne({ owner: user._id, name: forkName });
+    if (exists) {
+      forkName = `${forkName}-${Date.now().toString(36).slice(-4)}`;
+    }
+
+    const fork = new RepoModel({
+      name: forkName,
+      fullName: `${user.username}/${forkName}`,
+      description: source.description,
+      owner: user._id,
+      isPrivate: false,
+      isFork: true,
+      forkedFrom: source._id,
+      defaultBranch: source.defaultBranch,
+      language: source.language,
+      topics: source.topics || [],
+    });
+    await fork.save();
+
+    const sourceFiles = await FileModel.find({ repoId: source._id });
+    if (sourceFiles.length) {
+      await FileModel.insertMany(
+        sourceFiles.map((f) => ({
+          repoId: fork._id,
+          path: f.path,
+          content: f.content,
+          createdBy: req.user.userId,
+        }))
+      );
+    }
+
+    await RepoModel.findByIdAndUpdate(source._id, { $inc: { "stats.forks": 1 } });
+
+    await recordActivity({
+      actor: req.user.userId,
+      type: "repo_forked",
+      repository: fork._id,
+      payload: { sourceRepoId: source._id, name: fork.name },
+    });
+
+    res.status(201).json({
+      message: "Repository forked",
+      payload: fork,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
 
 // remove collaborator (owner only)
 repoRoute.delete(

@@ -6,6 +6,7 @@ import { optionalVerifyToken } from "../middlewares/optionalVerifyToken.js";
 import { loadRepo, requireRepoRead, requireRepoWrite } from "../middlewares/repoAccessMiddleware.js";
 import notificationService from "../services/notificationService.js";
 import { emitToRepo } from "../utils/socketRepoEmit.js";
+import { recordActivity } from "../services/activityService.js";
 
 export const issueRoute = exp.Router();
 
@@ -54,6 +55,13 @@ issueRoute.post("/repos/:repoId/issues", verifyToken("user"), loadRepo("repoId")
     emitToRepo(repoId, "issue:opened", {
       repositoryId: repoId,
       issue: newIssue.toObject(),
+    });
+
+    await recordActivity({
+      actor: req.user.userId,
+      type: "issue_opened",
+      repository: repoId,
+      payload: { issueId: newIssue._id, title, number: nextNumber },
     });
 
     res.status(201).json({
@@ -114,11 +122,29 @@ issueRoute.patch("/repos/:repoId/issues/:issueId", verifyToken("user"), loadRepo
     return res.status(404).json({ message: "issue not found" });
   }
 
-  const updatedIssue = await IssueModel.findByIdAndUpdate(
-    issueId,
-    req.body,
-    { new: true }
-  );
+  const allowed = {};
+  if (req.body.title !== undefined) allowed.title = req.body.title;
+  if (req.body.body !== undefined) allowed.body = req.body.body;
+  if (req.body.description !== undefined) allowed.body = req.body.description;
+  if (req.body.state !== undefined) {
+    if (!["open", "closed"].includes(req.body.state)) {
+      return res.status(400).json({ message: "state must be open or closed" });
+    }
+    allowed.state = req.body.state;
+    if (req.body.state === "closed") {
+      allowed.closedAt = new Date();
+      allowed.closedBy = req.user.userId;
+    } else {
+      allowed.closedAt = null;
+      allowed.closedBy = null;
+    }
+  }
+  if (req.body.labels !== undefined) allowed.labels = req.body.labels;
+  if (req.body.assignees !== undefined) allowed.assignees = req.body.assignees;
+
+  const updatedIssue = await IssueModel.findByIdAndUpdate(issueId, allowed, { new: true })
+    .populate("author", "name username")
+    .populate("assignees", "name username");
 
   res.status(200).json({
     message: "issue updated",

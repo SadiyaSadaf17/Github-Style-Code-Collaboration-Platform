@@ -10,19 +10,27 @@ config();
 export function optionalVerifyToken() {
   return async (req, res, next) => {
     try {
-      const token =
-        req.cookies?.token ||
-        (req.headers.authorization?.startsWith("Bearer ")
-          ? req.headers.authorization.substring(7)
-          : null);
+      const bearer = req.headers.authorization?.startsWith("Bearer ")
+        ? req.headers.authorization.substring(7)
+        : null;
+      const cookie = req.cookies?.token || null;
+      const candidates = [bearer, cookie].filter(Boolean);
 
-      if (!token) {
+      if (!candidates.length) {
         req.user = null;
         return next();
       }
 
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      req.user = decoded;
+      for (const token of candidates) {
+        try {
+          req.user = jwt.verify(token, process.env.JWT_SECRET);
+          return next();
+        } catch {
+          /* try next token */
+        }
+      }
+
+      req.user = null;
       next();
     } catch {
       req.user = null;

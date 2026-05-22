@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import { NotificationModel } from '../models/notificationModel.js';
+import logger from '../utils/logger.js';
 
 class NotificationService {
   constructor() {
@@ -39,11 +40,11 @@ class NotificationService {
     }
   }
 
-  // Send email notification
-  async sendEmail(to, subject, html, text = '') {
+  /** Send email immediately (used by job worker). */
+  async sendEmailDirect(to, subject, html, text = '') {
     try {
       if (!process.env.SMTP_USER) {
-        console.log('SMTP not configured, skipping email send');
+        logger.debug('SMTP not configured, skipping email send');
         return;
       }
 
@@ -52,16 +53,25 @@ class NotificationService {
         to,
         subject,
         html,
-        text: text || html.replace(/<[^>]*>/g, '') // Strip HTML for text version
+        text: text || html.replace(/<[^>]*>/g, ''),
       };
 
       const result = await this.transporter.sendMail(mailOptions);
-      console.log('Email sent:', result.messageId);
-
+      logger.info('Email sent', { messageId: result.messageId, to });
       return result;
     } catch (error) {
-      console.error('Error sending email:', error);
-      // Don't throw error for email failures - they shouldn't break the app
+      logger.error('Error sending email', { error: error.message, to });
+    }
+  }
+
+  /** Queue email when Redis/BullMQ available; otherwise send inline. */
+  async sendEmail(to, subject, html, text = '') {
+    if (!to) return;
+    try {
+      const { enqueueEmail } = await import('./queueService.js');
+      await enqueueEmail({ to, subject, html, text });
+    } catch {
+      return this.sendEmailDirect(to, subject, html, text);
     }
   }
 

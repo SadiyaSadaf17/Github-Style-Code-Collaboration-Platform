@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { isAuthBootstrapping } from '../utils/authSession.js';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
@@ -11,22 +12,67 @@ export const api = axios.create({
 const TOKEN_KEY = 'accessToken';
 const REFRESH_KEY = 'refreshToken';
 
+function migrateLegacyToken(key) {
+  const legacy = sessionStorage.getItem(key);
+  if (legacy) {
+    localStorage.setItem(key, legacy);
+    sessionStorage.removeItem(key);
+    return legacy;
+  }
+  return null;
+}
+
 export function getAccessToken() {
-  return sessionStorage.getItem(TOKEN_KEY);
+  return localStorage.getItem(TOKEN_KEY) || migrateLegacyToken(TOKEN_KEY);
 }
 
 export function getRefreshToken() {
-  return sessionStorage.getItem(REFRESH_KEY);
+  return localStorage.getItem(REFRESH_KEY) || migrateLegacyToken(REFRESH_KEY);
 }
 
 export function setOAuthTokens(accessToken, refreshToken) {
-  if (accessToken) sessionStorage.setItem(TOKEN_KEY, accessToken);
-  if (refreshToken) sessionStorage.setItem(REFRESH_KEY, refreshToken);
+  if (accessToken) localStorage.setItem(TOKEN_KEY, accessToken);
+  if (refreshToken) localStorage.setItem(REFRESH_KEY, refreshToken);
 }
 
 export function clearOAuthTokens() {
-  sessionStorage.removeItem(TOKEN_KEY);
-  sessionStorage.removeItem(REFRESH_KEY);
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(REFRESH_KEY);
+}
+
+function notifySessionExpired() {
+  if (isAuthBootstrapping()) return;
+  localStorage.removeItem('user');
+  clearOAuthTokens();
+  window.dispatchEvent(new Event('app-session-expired'));
+}
+
+/** Token for Socket.io handshake */
+export function getSocketAuthToken() {
+  return getAccessToken();
+}
+
+export async function attemptTokenRefresh() {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return null;
+  try {
+    const res = await axios.post(
+      `${API_BASE}/auth/refresh`,
+      { refreshToken },
+      { withCredentials: true }
+    );
+    const payload = res.data.payload || res.data;
+    const access = payload.accessToken;
+    const refresh = payload.refreshToken;
+    if (access) {
+      setOAuthTokens(access, refresh);
+      window.dispatchEvent(new Event('app-auth-changed'));
+      return access;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 api.interceptors.request.use((config) => {
@@ -49,33 +95,28 @@ api.interceptors.response.use(
 
     const refreshToken = getRefreshToken();
     if (!refreshToken) {
+      notifySessionExpired();
       return Promise.reject(error);
     }
 
     original._retry = true;
 
     if (!refreshPromise) {
-      refreshPromise = axios
-        .post(`${API_BASE}/auth/refresh`, { refreshToken })
-        .then((res) => {
-          const payload = res.data.payload || res.data;
-          const access = payload.accessToken;
-          const refresh = payload.refreshToken;
-          if (access) setOAuthTokens(access, refresh);
-          return access;
-        })
-        .finally(() => {
-          refreshPromise = null;
-        });
+      refreshPromise = attemptTokenRefresh().finally(() => {
+        refreshPromise = null;
+      });
     }
 
     try {
       const accessToken = await refreshPromise;
-      if (!accessToken) return Promise.reject(error);
+      if (!accessToken) {
+        notifySessionExpired();
+        return Promise.reject(error);
+      }
       original.headers.Authorization = `Bearer ${accessToken}`;
       return api(original);
     } catch (refreshErr) {
-      clearOAuthTokens();
+      notifySessionExpired();
       return Promise.reject(refreshErr);
     }
   }

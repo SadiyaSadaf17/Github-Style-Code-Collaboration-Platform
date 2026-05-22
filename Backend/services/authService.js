@@ -1,8 +1,8 @@
-import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { UserTypeModel } from "../models/userModel.js";
-import {config} from 'dotenv'
-config()
+import { generateTokenPair, persistRefreshToken } from "./tokenService.js";
+import { config } from "dotenv";
+config();
 
 //register function
 export const register = async (userObj) => {
@@ -47,15 +47,11 @@ export const authenticate = async ({ email, password }) => {
     throw err;
   }
 
-  //generate token
-  const token = jwt.sign({ userId: user._id, 
-    role: user.role, email: user.email }, 
-    process.env.JWT_SECRET, {
-    expiresIn: "1h",
-  });
+  const { accessToken, refreshToken } = generateTokenPair(user);
+  await persistRefreshToken(user._id, refreshToken);
 
   const userObj = user.toObject();
   delete userObj.password;
 
-  return { token, user: userObj };
+  return { token: accessToken, refreshToken, user: userObj };
 };

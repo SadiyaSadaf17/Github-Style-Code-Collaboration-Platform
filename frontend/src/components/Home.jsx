@@ -1,24 +1,28 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import api from '../services/api.js';
 import { Book, Star, Circle, Plus, Search } from 'lucide-react';
 import { getUserAvatarUrl } from '../utils/userAvatar.js';
 
 function Home() {
+  const [searchParams] = useSearchParams();
   const [repos, setRepos] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(searchParams.get('q') || '');
   const [error, setError] = useState('');
 
   const user = JSON.parse(localStorage.getItem('user') || 'null');
 
   useEffect(() => {
+    const q = searchParams.get('q');
+    if (q != null) setSearch(q);
+  }, [searchParams]);
+
+  useEffect(() => {
     const fetchPublicRepos = async () => {
       try {
         setError('');
-        const res = await axios.get('http://localhost:5001/repo-api/repos/explore/public', {
-          withCredentials: true,
-        });
+        const res = await api.get('/repo-api/repos/explore/public');
         setRepos(res.data.payload || []);
       } catch (err) {
         console.error('Error fetching explore feed', err);

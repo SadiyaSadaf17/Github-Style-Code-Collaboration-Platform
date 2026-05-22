@@ -164,27 +164,23 @@ export const checkOrgPermission = (requiredRole) => {
         });
       }
 
-      // Check if user is owner
-      if (org.owner.toString() === req.user.userId) {
+      const userId = req.user.userId.toString();
+      const isOwner = (org.owners || []).some((id) => id.toString() === userId);
+
+      if (isOwner) {
         return next();
       }
 
-      // Check member role
-      const member = org.members.find(
-        m => m.user.toString() === req.user.userId
-      );
+      const member = org.members.find((m) => m.user.toString() === userId);
 
-      const roleHierarchy = {
-        OWNER: ['OWNER', 'ADMIN', 'MEMBER'],
-        ADMIN: ['ADMIN', 'MEMBER'],
-        MEMBER: ['MEMBER']
+      const memberAllows = {
+        OWNER: false,
+        ADMIN: member?.role === "admin",
+        MEMBER: member?.role === "admin" || member?.role === "member",
       };
 
-      if (member) {
-        const userRoles = roleHierarchy[member.role] || [];
-        if (userRoles.includes(requiredRole)) {
-          return next();
-        }
+      if (memberAllows[requiredRole]) {
+        return next();
       }
 
       return res.status(403).json({ 

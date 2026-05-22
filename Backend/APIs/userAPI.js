@@ -3,10 +3,21 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { config } from "dotenv";
 import { register, authenticate } from "../services/authService.js";
+import {
+  revokeAllRefreshTokens,
+  revokeRefreshToken,
+  extractTokenFromRequest,
+  setAccessTokenCookie,
+  clearAccessTokenCookie,
+} from "../services/tokenService.js";
 import { verifyToken } from "../middlewares/verifyToken.js";
+import { optionalVerifyToken } from "../middlewares/optionalVerifyToken.js";
+import { CommitModel } from "../models/commitModel.js";
 import { UserTypeModel } from "../models/userModel.js";
 import fileService from "../services/fileService.js";
 import notificationService from "../services/notificationService.js";
+import { auditFromRequest } from "../services/auditService.js";
+import { authLimiter } from "../middlewares/rateLimiters.js";
 
 config();
 
@@ -26,7 +37,7 @@ function pickProfileUpdates(body) {
 }
 
 //Register user
-userRoute.post("/users", async (req, res) => {
+userRoute.post("/users", authLimiter, async (req, res) => {
   try {
     //get user obj from req
     let userObj = req.body;
@@ -40,26 +51,57 @@ userRoute.post("/users", async (req, res) => {
 });
 
 //Login user
-userRoute.post("/login", async (req, res) => {
+userRoute.post("/login", authLimiter, async (req, res) => {
   const { email, password } = req.body;
   try {
-    const { token, user } = await authenticate({ email, password });
-    // Set HttpOnly cookie
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: false, // Set to true in production with HTTPS
-      sameSite: 'lax',
-      maxAge: 3600000 // 1 hour
+    const { token, refreshToken, user } = await authenticate({ email, password });
+    setAccessTokenCookie(res, token);
+    auditFromRequest(req, {
+      actorId: user._id,
+      action: "user.login",
+      resourceType: "user",
+      resourceId: user._id,
+      status: "success",
     });
-    res.status(200).json({ message: "Login successful", token, user });
+    res.status(200).json({ message: "Login successful", token, refreshToken, user });
   } catch (err) {
+    auditFromRequest(req, {
+      action: "user.login",
+      resourceType: "user",
+      status: "failure",
+      metadata: { email },
+    });
     res.status(err.status || 500).json({ message: err.message });
   }
 });
 
 //Logout user
-userRoute.post("/logout", (req, res) => {
-  res.clearCookie('token');
+userRoute.post("/logout", async (req, res) => {
+  let userId;
+  try {
+    const accessToken = extractTokenFromRequest(req);
+    if (accessToken) {
+      const decoded = jwt.verify(accessToken, process.env.JWT_SECRET);
+      userId = decoded.userId;
+      const { refreshToken } = req.body || {};
+      if (refreshToken) {
+        await revokeRefreshToken(decoded.userId, refreshToken);
+      } else {
+        await revokeAllRefreshTokens(decoded.userId);
+      }
+    }
+  } catch {
+    /* ignore invalid token on logout */
+  }
+  if (userId) {
+    auditFromRequest(req, {
+      actorId: userId,
+      action: "user.logout",
+      resourceType: "user",
+      resourceId: userId,
+    });
+  }
+  clearAccessTokenCookie(res);
   res.status(200).json({ message: "Logout successful" });
 });
 
@@ -322,8 +364,70 @@ userRoute.patch("/users/me", verifyToken("user"), async (req, res) => {
   }
 });
 
+userRoute.get("/users/profile/:username/contributions", async (req, res) => {
+  try {
+    const user = await UserTypeModel.findOne({ username: req.params.username }).select("_id username");
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const year = Number(req.query.year) || new Date().getFullYear();
+    const start = new Date(year, 0, 1);
+    const end = new Date(year + 1, 0, 1);
+
+    const days = await CommitModel.aggregate([
+      {
+        $match: {
+          author: user._id,
+          createdAt: { $gte: start, $lt: end },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: "%Y-%m-%d", date: "$createdAt" },
+          },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]);
+
+    const total = days.reduce((sum, d) => sum + d.count, 0);
+    let streak = 0;
+    let maxStreak = 0;
+    const dayMap = new Map(days.map((d) => [d._id, d.count]));
+    const cursor = new Date(start);
+    const today = new Date();
+    const endDay = today < end ? today : new Date(end.getTime() - 1);
+
+    while (cursor <= endDay) {
+      const key = cursor.toISOString().slice(0, 10);
+      if (dayMap.get(key)) {
+        streak += 1;
+        maxStreak = Math.max(maxStreak, streak);
+      } else {
+        streak = 0;
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    res.status(200).json({
+      message: "contributions fetched",
+      payload: {
+        year,
+        total,
+        maxStreak,
+        days: days.map((d) => ({ date: d._id, count: d.count })),
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 //Get user profile by username
-userRoute.get("/users/profile/:username", async (req, res) => {
+userRoute.get("/users/profile/:username", optionalVerifyToken(), async (req, res) => {
   try {
     const user = await UserTypeModel.findOne({ username: req.params.username })
       .select("-password -refreshTokens -passwordResetToken -emailVerificationToken")
@@ -333,9 +437,81 @@ userRoute.get("/users/profile/:username", async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
+    const payload = user.toObject();
+    payload.followerCount = user.followers?.length || 0;
+    payload.followingCount = user.following?.length || 0;
+
+    if (req.user?.userId) {
+      const viewerId = req.user.userId.toString();
+      const targetId = user._id.toString();
+      payload.isFollowing = (user.followers || []).some((id) => id.toString() === viewerId);
+      payload.isSelf = viewerId === targetId;
+    }
+
     res.status(200).json({
       message: "user fetched",
-      payload: user
+      payload,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+userRoute.post("/users/:userId/follow", verifyToken("user"), async (req, res) => {
+  try {
+    const targetId = req.params.userId;
+    const viewerId = req.user.userId;
+
+    if (targetId === viewerId) {
+      return res.status(400).json({ message: "You cannot follow yourself" });
+    }
+
+    const target = await UserTypeModel.findById(targetId);
+    if (!target) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    await UserTypeModel.findByIdAndUpdate(viewerId, {
+      $addToSet: { following: targetId },
+    });
+    await UserTypeModel.findByIdAndUpdate(targetId, {
+      $addToSet: { followers: viewerId },
+    });
+
+    const updated = await UserTypeModel.findById(targetId).select("followers following username");
+
+    res.status(200).json({
+      message: "Now following user",
+      payload: {
+        following: true,
+        followerCount: updated.followers?.length || 0,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+userRoute.delete("/users/:userId/follow", verifyToken("user"), async (req, res) => {
+  try {
+    const targetId = req.params.userId;
+    const viewerId = req.user.userId;
+
+    await UserTypeModel.findByIdAndUpdate(viewerId, {
+      $pull: { following: targetId },
+    });
+    await UserTypeModel.findByIdAndUpdate(targetId, {
+      $pull: { followers: viewerId },
+    });
+
+    const updated = await UserTypeModel.findById(targetId).select("followers");
+
+    res.status(200).json({
+      message: "Unfollowed user",
+      payload: {
+        following: false,
+        followerCount: updated?.followers?.length || 0,
+      },
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -385,6 +561,12 @@ userRoute.delete("/users/:id", verifyToken("user"), async (req, res) => {
     if (!deletedUser) {
       return res.status(404).json({ message: "User not found" });
     }
+
+    auditFromRequest(req, {
+      action: "user.delete",
+      resourceType: "user",
+      resourceId: userId,
+    });
 
     res.status(200).json({
       message: "user deleted successfully",

@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import api from '../services/api';
-import { FileText, GitBranch, Plus, MessageSquare, GitPullRequest, GitCommit, Users } from 'lucide-react';
-import FileTree from './explorer/FileTree';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
+import api from '../services/api.js';
+import ReactMarkdown from 'react-markdown';
+import { FileText, GitBranch, Plus, MessageSquare, GitPullRequest, GitCommit, Users, Star, Eye, GitFork } from 'lucide-react';
+import RepoCodeWorkspace from './explorer/RepoCodeWorkspace';
 
 function RepoExplorer() {
   const { repoId } = useParams();
+  const [searchParams] = useSearchParams();
   const [repoInfo, setRepoInfo] = useState(null);
   const [files, setFiles] = useState([]);
   const [issues, setIssues] = useState([]);
@@ -24,6 +26,34 @@ function RepoExplorer() {
   const [collaborators, setCollaborators] = useState([]);
   const [inviteUsername, setInviteUsername] = useState('');
   const [inviteRole, setInviteRole] = useState('viewer');
+  const [readmeContent, setReadmeContent] = useState(null);
+  const [socialBusy, setSocialBusy] = useState(false);
+
+  const loadReadme = async (fileList) => {
+    const readme = fileList.find(
+      (f) => f.path?.toLowerCase() === 'readme.md' || f.path?.toLowerCase() === 'readme.markdown'
+    );
+    if (readme) {
+      try {
+        const readmeRes = await api.get(`/file-api/repos/${repoId}/file`, {
+          params: { path: readme.path },
+        });
+        setReadmeContent(readmeRes.data.payload?.content ?? readmeRes.data.content ?? '');
+      } catch {
+        setReadmeContent(null);
+      }
+    } else {
+      setReadmeContent(null);
+    }
+  };
+
+  const refreshFiles = async () => {
+    const fileRes = await api.get(`/file-api/repos/${repoId}/files`);
+    const fileList = fileRes.data.payload || fileRes.data || [];
+    setFiles(fileList);
+    await loadReadme(fileList);
+    return fileList;
+  };
 
   useEffect(() => {
     const fetchRepoData = async () => {
@@ -40,10 +70,12 @@ function RepoExplorer() {
           api.get(`/commit-api/repos/${repoId}/commits`),
         ]);
 
-        setFiles(fileRes.data.payload || fileRes.data || []);
+        const fileList = fileRes.data.payload || fileRes.data || [];
+        setFiles(fileList);
         setIssues(issueRes.data.payload || issueRes.data || []);
         setPulls(pullRes.data.payload || pullRes.data || []);
         setCommits(commitRes.data.payload || commitRes.data || []);
+        await loadReadme(fileList);
       } catch (err) {
         const st = err.response?.status;
         if (st === 401 || st === 403) {
@@ -58,6 +90,18 @@ function RepoExplorer() {
     };
     fetchRepoData();
   }, [repoId]);
+
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    const validTabs = ['code', 'issues', 'pulls', 'commits', 'team'];
+    if (tab && validTabs.includes(tab)) {
+      setActiveTab(tab);
+    }
+    if (searchParams.get('create') === '1') {
+      if (tab === 'issues') setShowIssueForm(true);
+      if (tab === 'pulls') setShowPRForm(true);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (activeTab !== 'team' || !repoId || fetchError) return;
@@ -84,11 +128,7 @@ function RepoExplorer() {
       }, { withCredentials: true });
       setNewFilePath('');
       setNewFileContent('');
-      // Refresh files
-      const fileRes = await api.get(`/file-api/repos/${repoId}/files`, {
-        withCredentials: true
-      });
-      setFiles(fileRes.data.payload || fileRes.data);
+      await refreshFiles();
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to create file');
     } finally {
@@ -179,6 +219,51 @@ function RepoExplorer() {
     }
   };
 
+  const handleStar = async () => {
+    setSocialBusy(true);
+    try {
+      const res = await api.post(`/repo-api/repos/${repoId}/star`);
+      setRepoInfo((prev) => ({
+        ...prev,
+        isStarred: res.data.payload?.starred,
+        stats: { ...prev.stats, stars: res.data.payload?.stars ?? prev.stats?.stars },
+      }));
+    } catch (err) {
+      alert(err.response?.data?.message || 'Could not update star');
+    } finally {
+      setSocialBusy(false);
+    }
+  };
+
+  const handleWatch = async () => {
+    setSocialBusy(true);
+    try {
+      const res = await api.post(`/repo-api/repos/${repoId}/watch`);
+      setRepoInfo((prev) => ({
+        ...prev,
+        isWatched: res.data.payload?.watched,
+        stats: { ...prev.stats, watchers: res.data.payload?.watchers ?? prev.stats?.watchers },
+      }));
+    } catch (err) {
+      alert(err.response?.data?.message || 'Could not update watch');
+    } finally {
+      setSocialBusy(false);
+    }
+  };
+
+  const handleFork = async () => {
+    setSocialBusy(true);
+    try {
+      const res = await api.post(`/repo-api/repos/${repoId}/fork`);
+      const fork = res.data.payload;
+      window.location.href = `/repo/${fork._id}`;
+    } catch (err) {
+      alert(err.response?.data?.message || 'Could not fork repository');
+    } finally {
+      setSocialBusy(false);
+    }
+  };
+
   const handleChangeMemberRole = async (userId, role) => {
     try {
       await api.patch(
@@ -213,22 +298,67 @@ function RepoExplorer() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
-      <div className="flex items-center gap-2 text-xl mb-6">
-        <GitBranch size={20} className="text-gray-500" />
-        <Link to={`/profile/${repoInfo?.owner?.name}`} className="text-[#0969da] hover:underline">
-          {repoInfo?.owner?.name}
-        </Link>
-        <span className="text-gray-400">/</span>
-        <span className="font-bold">{repoInfo?.name}</span>
-        <span className="ml-2 px-2 py-0.5 border border-gray-300 rounded-full text-xs text-gray-500 lowercase">
-          {repoInfo?.isPrivate ? 'private' : 'public'}
-        </span>
-        {repoInfo?.currentUserRole && (
-          <span className="ml-2 px-2 py-0.5 bg-gray-100 border border-gray-200 rounded-full text-xs text-gray-700 capitalize">
-            your role: {repoInfo.currentUserRole}
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <div className="flex items-center gap-2 text-xl">
+          <GitBranch size={20} className="text-gray-500" />
+          <Link to={`/profile/${repoInfo?.owner?.username || repoInfo?.owner?.name}`} className="text-[#0969da] hover:underline">
+            {repoInfo?.owner?.username || repoInfo?.owner?.name}
+          </Link>
+          <span className="text-gray-400">/</span>
+          <span className="font-bold">{repoInfo?.name}</span>
+          <span className="ml-2 px-2 py-0.5 border border-gray-300 rounded-full text-xs text-gray-500 lowercase">
+            {repoInfo?.isPrivate ? 'private' : 'public'}
           </span>
-        )}
+          {repoInfo?.isFork && (
+            <span className="text-xs text-gray-500">forked</span>
+          )}
+          {repoInfo?.currentUserRole && (
+            <span className="ml-2 px-2 py-0.5 bg-gray-100 border border-gray-200 rounded-full text-xs text-gray-700 capitalize">
+              your role: {repoInfo.currentUserRole}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={socialBusy}
+            onClick={handleStar}
+            className={`flex items-center gap-1 px-3 py-1.5 border rounded-md text-sm font-semibold ${
+              repoInfo.isStarred ? 'bg-[#fff8c5] border-[#d4a72c]' : 'bg-[#f6f8fa] border-[#d0d7de] hover:bg-gray-100'
+            }`}
+          >
+            <Star size={14} className={repoInfo.isStarred ? 'fill-[#9a6700] text-[#9a6700]' : ''} />
+            {repoInfo.stats?.stars ?? 0}
+          </button>
+          <button
+            type="button"
+            disabled={socialBusy}
+            onClick={handleWatch}
+            className={`flex items-center gap-1 px-3 py-1.5 border rounded-md text-sm font-semibold ${
+              repoInfo.isWatched ? 'bg-[#ddf4ff] border-[#0969da]' : 'bg-[#f6f8fa] border-[#d0d7de] hover:bg-gray-100'
+            }`}
+          >
+            <Eye size={14} />
+            {repoInfo.stats?.watchers ?? 0}
+          </button>
+          <button
+            type="button"
+            disabled={socialBusy}
+            onClick={handleFork}
+            className="flex items-center gap-1 px-3 py-1.5 border border-[#d0d7de] rounded-md text-sm font-semibold bg-[#f6f8fa] hover:bg-gray-100"
+          >
+            <GitFork size={14} />
+            Fork
+          </button>
+        </div>
       </div>
+
+      {readmeContent != null && activeTab === 'code' && (
+        <div className="mb-6 border border-[#d0d7de] rounded-md bg-white p-6 prose prose-sm max-w-none">
+          <h2 className="text-lg font-semibold mb-3 border-b pb-2">README</h2>
+          <ReactMarkdown>{readmeContent}</ReactMarkdown>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex border-b border-gray-200 mb-6">
@@ -272,35 +402,14 @@ function RepoExplorer() {
       {/* Tab Content */}
       {activeTab === 'code' && (
         <>
-          <div className="flex border border-[#d0d7de] rounded-md overflow-hidden bg-white min-h-[320px]">
-            <div className="w-56 sm:w-64 shrink-0 border-r border-[#d0d7de]">
-              <FileTree repoId={repoId} files={files} />
-            </div>
-            <div className="flex-1 overflow-x-auto">
-              <table className="w-full text-sm">
-                <tbody>
-                  {files.map((file) => (
-                    <tr key={file._id || file.path} className="border-b last:border-0 hover:bg-gray-50">
-                      <td className="px-4 py-2 w-8">
-                        <FileText size={18} className="text-gray-500" />
-                      </td>
-                      <td className="py-2">
-                        <Link
-                          to={`/repo/${repoId}/blob/${file.path}`}
-                          className="text-[#0969da] hover:underline font-medium font-mono"
-                        >
-                          {file.path}
-                        </Link>
-                      </td>
-                      <td className="py-2 text-gray-500 text-xs">
-                        {file.updatedAt ? new Date(file.updatedAt).toLocaleString() : '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <RepoCodeWorkspace
+            repoId={repoId}
+            repoInfo={repoInfo}
+            files={files}
+            canWrite={canWrite}
+            onFilesRefresh={refreshFiles}
+            showBreadcrumbs={false}
+          />
 
           {canWrite && (
           <div className="mt-8 p-4 border border-gray-300 rounded-md bg-white">

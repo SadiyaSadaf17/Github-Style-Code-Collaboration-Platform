@@ -122,6 +122,11 @@ const userSchema = new Schema(
       ref: "Repository"
     }],
 
+    watchedRepos: [{
+      type: Schema.Types.ObjectId,
+      ref: "Repository"
+    }],
+
     contributionStats: {
       commits: { type: Number, default: 0 },
       pullRequests: { type: Number, default: 0 },
